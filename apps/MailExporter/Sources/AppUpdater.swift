@@ -36,6 +36,21 @@ final class AppUpdater: ObservableObject {
             Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 await checkForUpdates(silent: true)
+                if updateAvailable {
+                    showUpdateWindow()
+                }
+            }
+        }
+    }
+
+    func showUpdateWindow() {
+        isChecking = true
+        errorMessage = nil
+        statusMessage = "Checking GitHub for updates…"
+        UpdateWindowController.shared.show(updater: self)
+        if !isUpdating {
+            Task {
+                await checkForUpdates(silent: false)
             }
         }
     }
@@ -354,5 +369,149 @@ final class AppUpdater: ObservableObject {
             errorMessage = msg
             statusMessage = "Update failed: \(msg)"
         }
+    }
+}
+
+@MainActor
+final class UpdateWindowController: NSWindowController {
+    static let shared = UpdateWindowController()
+
+    private init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 180),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Software Update"
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        super.init(window: window)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func show(updater: AppUpdater) {
+        guard let window = self.window else { return }
+        window.contentViewController = NSHostingController(
+            rootView: UpdateDialogView(updater: updater, onClose: { [weak window] in
+                window?.close()
+            })
+        )
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct UpdateDialogView: View {
+    @ObservedObject var updater: AppUpdater
+    var onClose: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 64, height: 64)
+
+            VStack(alignment: .leading, spacing: 10) {
+                if updater.isUpdating {
+                    Text("Updating MailExporter…")
+                        .font(.headline)
+                    Text(updater.statusMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    ProgressView()
+                        .padding(.top, 4)
+                } else if updater.isChecking {
+                    Text("Checking for updates…")
+                        .font(.headline)
+                    Text("Connecting to GitHub…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                    HStack {
+                        Spacer()
+                        Button("Cancel") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                    }
+                    .padding(.top, 6)
+                } else if updater.updateAvailable {
+                    Text("A new version of MailExporter is available!")
+                        .font(.headline)
+                    Text("MailExporter \(updater.latestVersion) is now available (you have v\(updater.currentVersion)). Would you like to install it now?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if !updater.releaseNotes.isEmpty {
+                        ScrollView {
+                            Text(updater.releaseNotes)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 100)
+                        .padding(6)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(6)
+                    }
+
+                    HStack(spacing: 12) {
+                        Spacer()
+                        Button("Later") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.cancelAction)
+
+                        Button("Install Update") {
+                            Task {
+                                await updater.downloadAndInstall()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(.top, 6)
+                } else if let error = updater.errorMessage {
+                    Text("Update Check Failed")
+                        .font(.headline)
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Spacer()
+                        Button("OK") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(.top, 6)
+                } else {
+                    Text("You’re up to date!")
+                        .font(.headline)
+                    Text("MailExporter \(updater.currentVersion) is currently the newest version available.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Spacer()
+                        Button("OK") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(.top, 6)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
     }
 }

@@ -34,10 +34,7 @@ struct MailExporterApp: App {
             }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                    Task {
-                        await AppUpdater.shared.checkForUpdates(silent: false)
-                    }
+                    AppUpdater.shared.showUpdateWindow()
                 }
             }
         }

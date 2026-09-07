@@ -150,7 +150,7 @@ struct UpdatesPreferencesView: View {
 
                 HStack(spacing: 12) {
                     Button(action: {
-                        Task { await updater.checkForUpdates(silent: false) }
+                        updater.showUpdateWindow()
                     }) {
                         if updater.isChecking {
                             ProgressView()
