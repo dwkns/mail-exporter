@@ -69,10 +69,29 @@ if [[ ! -x "${VENV}/bin/pyinstaller" ]]; then
   "${VENV}/bin/pip" install -q pyinstaller -r "${REPO}/requirements-dev.txt"
 fi
 
+# Determine version and build number
+if [[ -n "${APP_VERSION:-}" ]]; then
+  VERSION="${APP_VERSION#v}"
+else
+  LATEST_TAG="$(git -C "${REPO}" describe --tags --abbrev=0 2>/dev/null || echo "v1.1.0")"
+  BASE_VERSION="${LATEST_TAG#v}"
+  COMMITS_SINCE="$(git -C "${REPO}" rev-list --count "${LATEST_TAG}..HEAD" 2>/dev/null || echo "0")"
+
+  IFS='.' read -r MAJOR MINOR PATCH_BASE <<< "${BASE_VERSION}"
+  MAJOR="${MAJOR:-1}"
+  MINOR="${MINOR:-1}"
+  PATCH_BASE="${PATCH_BASE:-0}"
+  PATCH=$(( PATCH_BASE + COMMITS_SINCE ))
+  VERSION="${MAJOR}.${MINOR}.${PATCH}"
+fi
+
+BUILD_NUMBER="$(git -C "${REPO}" rev-list --count HEAD 2>/dev/null || echo "1")"
+echo "Building MailExporter v${VERSION} (build ${BUILD_NUMBER})…"
+
 rm -rf "${APP}" "${PYI_DIST}" "${PYI_WORK}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources" "${HELPER_DIR}" "${ROOT}/build"
 
-cat > "${APP}/Contents/Info.plist" <<'PLIST'
+cat > "${APP}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -84,9 +103,9 @@ cat > "${APP}/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key>
   <string>com.dwkns.MailExporter</string>
   <key>CFBundleVersion</key>
-  <string>1.1</string>
+  <string>${BUILD_NUMBER}</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.1</string>
+  <string>${VERSION}</string>
   <key>CFBundleExecutable</key>
   <string>MailExporter</string>
   <key>CFBundlePackageType</key>

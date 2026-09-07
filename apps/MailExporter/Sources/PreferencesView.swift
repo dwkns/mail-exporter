@@ -136,7 +136,7 @@ struct UpdatesPreferencesView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("MailExporter")
                         .font(.headline)
-                    Text("Installed Version \(updater.currentVersion)")
+                    Text("Installed Version \(updater.currentVersion) (build \(updater.currentBuild))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

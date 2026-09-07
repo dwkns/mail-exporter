@@ -28,7 +28,11 @@ final class AppUpdater: ObservableObject {
     private var activeRelease: ReleaseInfo?
 
     var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
+    }
+
+    var currentBuild: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
     }
 
     private init() {
@@ -497,7 +501,7 @@ struct UpdateDialogView: View {
                 } else {
                     Text("You’re up to date!")
                         .font(.headline)
-                    Text("MailExporter \(updater.currentVersion) is currently the newest version available.")
+                    Text("MailExporter v\(updater.currentVersion) (build \(updater.currentBuild)) is currently the newest version available.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack {
