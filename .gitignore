@@ -1,0 +1,14 @@
+.venv/
+apps/MailExporter/build/
+apps/MailExporter/MailExporter.app/
+apps/MailExporter/vendor/
+**/MailExporter.app/
+__pycache__/
+*.pyc
+.DS_Store
+*.eml
+.exported-ids.json
+*.zip
+*.sha256
+imap.json
+**/imap.json

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mail-exporter": {
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["-m", "mailexporter_mcp"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  }
+}

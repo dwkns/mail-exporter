@@ -1,0 +1,16 @@
+---
+description: Always rebuild MailExporter.app after app or bundled-resource changes
+alwaysApply: true
+---
+
+# Rebuild MailExporter after changes
+
+Whenever you change anything that ships in the Mac app — Swift under `apps/MailExporter/Sources/`, AppleScript or resources under `apps/MailExporter/Resources/`, `engine_entry.py`, or engine code bundled into the app — finish by running:
+
+```bash
+./apps/MailExporter/build.sh
+```
+
+The build script will automatically compile, sign, and copy the app to `/Applications/MailExporter.app`.
+
+Do this automatically; do not ask the user to rebuild. Prefer rebuilding after the related commit for that change (or immediately if the change is not committed yet). Tell the user briefly that the app was rebuilt and copied to `/Applications`.
