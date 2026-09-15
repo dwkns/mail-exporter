@@ -124,25 +124,40 @@ def test_default_jobs_path_resolution(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     from engine.jobs import default_jobs_path
 
-    # Scenario 1: neither exists, no iCloud dir -> fallback local
-    assert default_jobs_path() == tmp_path / "Library/Application Support/MailExporter/jobs.json"
+    local_path = tmp_path / "Library/Application Support/MailExporter/jobs.json"
+    ubiquity_path = (
+        tmp_path
+        / "Library/Mobile Documents/iCloud.com~dwkns~MailExporter/Documents/jobs.json"
+    )
+    legacy_path = (
+        tmp_path / "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
+    )
 
-    # Scenario 2: iCloud dir exists -> default to iCloud path
-    icloud_dir = tmp_path / "Library/Mobile Documents/com~apple~CloudDocs"
-    icloud_dir.mkdir(parents=True)
-    assert default_jobs_path() == icloud_dir / "MailExporter/jobs.json"
+    # Scenario 1: nothing exists -> local Application Support
+    assert default_jobs_path() == local_path
 
-    # Scenario 3: local file exists and no iCloud file -> local file
-    local_file = tmp_path / "Library/Application Support/MailExporter/jobs.json"
-    local_file.parent.mkdir(parents=True, exist_ok=True)
-    local_file.write_text("{}", encoding="utf-8")
-    assert default_jobs_path() == local_file
+    # Scenario 2: ubiquity container directory exists -> prefer ubiquity path
+    ubiquity_path.parent.mkdir(parents=True)
+    assert default_jobs_path() == ubiquity_path
 
-    # Scenario 4: iCloud file exists -> takes precedence
-    icloud_file = icloud_dir / "MailExporter/jobs.json"
-    icloud_file.parent.mkdir(parents=True, exist_ok=True)
-    icloud_file.write_text("{}", encoding="utf-8")
-    assert default_jobs_path() == icloud_file
+    # Scenario 3: local file only (no ubiquity file) -> local
+    # Remove ubiquity parent so we don't prefer empty container dirs
+    import shutil
+
+    shutil.rmtree(ubiquity_path.parent.parent)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_text("{}", encoding="utf-8")
+    assert default_jobs_path() == local_path
+
+    # Scenario 4: legacy CloudDocs file takes precedence over local
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("{}", encoding="utf-8")
+    assert default_jobs_path() == legacy_path
+
+    # Scenario 5: ubiquity file wins over legacy + local
+    ubiquity_path.parent.mkdir(parents=True, exist_ok=True)
+    ubiquity_path.write_text("{}", encoding="utf-8")
+    assert default_jobs_path() == ubiquity_path
 
 
 def test_load_job_with_bookmark(tmp_path: Path) -> None:

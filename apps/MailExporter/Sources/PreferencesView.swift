@@ -79,10 +79,11 @@ struct StoragePreferencesView: View {
                     revealInFinder()
                 }
 
-                if prefs.storageLocation == .iCloud && JobsStore.icloudDocsURL == nil {
-                    Text("iCloud Drive not active on this Mac. Using local storage.")
+                if prefs.storageLocation == .iCloud && !JobsStore.isICloudAvailable {
+                    Text("iCloud is signed out or unavailable on this Mac. Using local Application Support until iCloud is available.")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -256,7 +257,7 @@ struct AdvancedPreferencesView: View {
                 Text("Factory Reset")
                     .font(.subheadline.weight(.semibold))
 
-                Text("Resets all settings back to defaults and deletes mailbox configurations from both this Mac and iCloud Drive. Exported emails already saved in your folders will not be deleted.")
+                Text("Resets all settings back to defaults and deletes mailbox configurations from both this Mac and iCloud. Exported emails already saved in your folders will not be deleted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -277,7 +278,7 @@ struct AdvancedPreferencesView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently remove all mailbox configurations and preferences from this Mac and iCloud Drive.\n\nTip: You can export a backup of your settings anytime from File → Export Settings… before resetting.")
+            Text("This will permanently remove all mailbox configurations and preferences from this Mac and iCloud.\n\nTip: You can export a backup of your settings anytime from File → Export Settings… before resetting.")
         }
     }
 }

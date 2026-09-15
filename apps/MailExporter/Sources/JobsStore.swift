@@ -272,19 +272,33 @@ final class JobsStore: ObservableObject {
     @Published var needsFullDiskAccess: Bool = false
     @Published var needsAccessibility: Bool = false
 
-    static var icloudDocsURL: URL? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            return url
-        }
-        return nil
+    /// Private iCloud ubiquity container (does not appear as an iCloud Drive folder).
+    static let iCloudContainerIdentifier = "iCloud.com.dwkns.MailExporter"
+
+    /// Root of the app's ubiquity container, or nil when iCloud is signed out / unavailable.
+    static var iCloudContainerURL: URL? {
+        FileManager.default.url(forUbiquityContainerIdentifier: iCloudContainerIdentifier)
     }
 
+    /// Whether the ubiquity container is currently available.
+    static var isICloudAvailable: Bool {
+        iCloudContainerURL != nil
+    }
+
+    /// Preferred jobs.json location inside the private ubiquity container.
     static var defaultICloudURL: URL? {
-        guard let docs = icloudDocsURL else { return nil }
-        return docs.appendingPathComponent("MailExporter/jobs.json")
+        guard let container = iCloudContainerURL else { return nil }
+        return container
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("jobs.json")
+    }
+
+    /// Legacy path from the old "visible iCloud Drive folder" storage.
+    static var legacyCloudDocsJobsURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
+            )
     }
 
     static var defaultLocalURL: URL {
@@ -299,6 +313,7 @@ final class JobsStore: ObservableObject {
             if let icloud = defaultICloudURL {
                 return icloud
             }
+            // iCloud signed out / unavailable — keep writing locally until it returns.
             return defaultLocalURL
         case .local:
             return defaultLocalURL
@@ -344,21 +359,28 @@ final class JobsStore: ObservableObject {
         refreshMailAccess()
     }
 
+    /// Migrates jobs.json into the private ubiquity container once, preferring the
+    /// legacy CloudDocs copy when present, then local Application Support.
     static func autoMigrateToICloudIfNeeded() {
         guard AppPreferences.shared.storageLocation == .iCloud,
               let icloudURL = defaultICloudURL else { return }
-        let localURL = defaultLocalURL
         let fm = FileManager.default
-        if !fm.fileExists(atPath: icloudURL.path) && fm.fileExists(atPath: localURL.path) {
-            do {
-                try fm.createDirectory(
-                    at: icloudURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try fm.copyItem(at: localURL, to: icloudURL)
-            } catch {
-                // If migration fails, reload() will fall back to localURL
-            }
+        if fm.fileExists(atPath: icloudURL.path) { return }
+
+        let candidates: [URL] = [legacyCloudDocsJobsURL, defaultLocalURL]
+        guard let source = candidates.first(where: { fm.fileExists(atPath: $0.path) }) else {
+            return
+        }
+        do {
+            try fm.createDirectory(
+                at: icloudURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try fm.copyItem(at: source, to: icloudURL)
+            // Stop using the visible Drive folder; leave the file in place so the
+            // user can delete it manually if they want.
+        } catch {
+            // If migration fails, reload() can still read the legacy/local copy.
         }
     }
 
@@ -386,8 +408,13 @@ final class JobsStore: ObservableObject {
         let url = configURL
         let fm = FileManager.default
         var targetURL = url
-        if !fm.fileExists(atPath: targetURL.path) && targetURL != Self.defaultLocalURL && fm.fileExists(atPath: Self.defaultLocalURL.path) {
-            targetURL = Self.defaultLocalURL
+        if !fm.fileExists(atPath: targetURL.path) {
+            let fallbacks = [Self.legacyCloudDocsJobsURL, Self.defaultLocalURL]
+            if let fallback = fallbacks.first(where: {
+                $0 != targetURL && fm.fileExists(atPath: $0.path)
+            }) {
+                targetURL = fallback
+            }
         }
 
         guard fm.fileExists(atPath: targetURL.path) else {
@@ -474,12 +501,15 @@ final class JobsStore: ObservableObject {
         for job in jobs {
             cleanUpScaffoldFolderIfEmpty(at: job.outputDir)
         }
-        let localPath = Self.defaultLocalURL.path
-        if fm.fileExists(atPath: localPath) {
-            try? fm.removeItem(atPath: localPath)
-        }
-        if let icloudPath = Self.defaultICloudURL?.path, fm.fileExists(atPath: icloudPath) {
-            try? fm.removeItem(atPath: icloudPath)
+        let pathsToRemove: [String] = [
+            Self.defaultLocalURL.path,
+            Self.defaultICloudURL?.path,
+            Self.legacyCloudDocsJobsURL.path,
+        ].compactMap { $0 }
+        for path in pathsToRemove {
+            if fm.fileExists(atPath: path) {
+                try? fm.removeItem(atPath: path)
+            }
         }
         if !AppPreferences.shared.customStoragePath.isEmpty {
             let custom = (AppPreferences.shared.customStoragePath as NSString).expandingTildeInPath

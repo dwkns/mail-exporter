@@ -49,18 +49,37 @@ class JobsFile:
 
 
 def default_jobs_path() -> Path:
+    """Resolve jobs.json with the same priority as the macOS app.
+
+    Prefer the private iCloud ubiquity container (not the visible Drive folder),
+    then legacy CloudDocs, then local Application Support.
+    """
     env = os.environ.get("MAILEXPORTER_CONFIG")
     if env:
         return Path(env).expanduser()
-    icloud_path = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
-    if icloud_path.is_file():
-        return icloud_path
-    local_path = Path.home() / "Library/Application Support/MailExporter/jobs.json"
+
+    home = Path.home()
+    # On-disk layout for container id iCloud.com.dwkns.MailExporter
+    ubiquity_path = (
+        home
+        / "Library/Mobile Documents/iCloud.com~dwkns~MailExporter/Documents/jobs.json"
+    )
+    if ubiquity_path.is_file():
+        return ubiquity_path
+
+    legacy_clouddocs = (
+        home / "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
+    )
+    if legacy_clouddocs.is_file():
+        return legacy_clouddocs
+
+    local_path = home / "Library/Application Support/MailExporter/jobs.json"
     if local_path.is_file():
         return local_path
-    icloud_dir = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs"
-    if icloud_dir.is_dir():
-        return icloud_path
+
+    # Prefer ubiquity container when its parent exists (app has provisioned it).
+    if ubiquity_path.parent.is_dir() or ubiquity_path.parent.parent.is_dir():
+        return ubiquity_path
     return local_path
 
 

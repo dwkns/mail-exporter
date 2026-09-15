@@ -124,6 +124,18 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
   <string>alert</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>MailExporter opens Mail drafts and replies from Markdown email files.</string>
+  <key>NSUbiquitousContainers</key>
+  <dict>
+    <key>iCloud.com.dwkns.MailExporter</key>
+    <dict>
+      <key>NSUbiquitousContainerIsDocumentScopePublic</key>
+      <false/>
+      <key>NSUbiquitousContainerName</key>
+      <string>MailExporter</string>
+      <key>NSUbiquitousContainerSupportedFolderLevels</key>
+      <string>None</string>
+    </dict>
+  </dict>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
@@ -172,12 +184,24 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Entitlements: allow bundled PyInstaller helper under same app identity
+# Entitlements: iCloud ubiquity container + allow bundled PyInstaller helper
 cat > "${ROOT}/build/MailExporter.entitlements" <<'ENT'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>com.apple.developer.icloud-container-identifiers</key>
+  <array>
+    <string>iCloud.com.dwkns.MailExporter</string>
+  </array>
+  <key>com.apple.developer.ubiquity-container-identifiers</key>
+  <array>
+    <string>iCloud.com.dwkns.MailExporter</string>
+  </array>
+  <key>com.apple.developer.icloud-services</key>
+  <array>
+    <string>CloudDocuments</string>
+  </array>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
   <key>com.apple.security.cs.disable-library-validation</key>
@@ -185,6 +209,9 @@ cat > "${ROOT}/build/MailExporter.entitlements" <<'ENT'
 </dict>
 </plist>
 ENT
+
+# Keep a checked-in copy for reference / Xcode import later
+cp "${ROOT}/build/MailExporter.entitlements" "${ROOT}/MailExporter.entitlements"
 
 echo "Compiling Swift UI…"
 swiftc \

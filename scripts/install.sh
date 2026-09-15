@@ -97,12 +97,9 @@ fi
 echo "Configuring permissions (clearing Gatekeeper quarantine)…"
 xattr -cr "${DEST_DIR}/${APP_NAME}" 2>/dev/null || true
 
-# 5. Ensure iCloud storage directory exists
-ICLOUD_DOCS="${HOME}/Library/Mobile Documents/com~apple~CloudDocs"
-if [[ -d "${ICLOUD_DOCS}" ]]; then
-  mkdir -p "${ICLOUD_DOCS}/MailExporter"
-  echo "iCloud storage directory prepared at: ${ICLOUD_DOCS}/MailExporter"
-fi
+# 5. iCloud app-container storage is provisioned by the signed app at runtime
+# (iCloud.com.dwkns.MailExporter). Do not create a visible iCloud Drive folder.
+echo "iCloud: jobs.json syncs via the app ubiquity container when iCloud is enabled."
 
 echo ""
 echo "========================================================"

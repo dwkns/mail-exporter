@@ -10,7 +10,7 @@ enum StorageLocation: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .iCloud: return "iCloud Drive (Recommended)"
+        case .iCloud: return "iCloud (App Sync)"
         case .local: return "Local Mac (Application Support)"
         case .custom: return "Custom Folder"
         }
