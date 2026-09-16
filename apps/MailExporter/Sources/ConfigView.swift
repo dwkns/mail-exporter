@@ -165,7 +165,7 @@ struct ConfigView: View {
                     busy = false
                     let message = error.localizedDescription
                     if MailAccessProbe.looksLikeFullDiskDenial(message) {
-                        store.needsFullDiskAccess = true
+                        store.flagFullDiskAccessRequired()
                     }
                     previewText = "Couldn’t check matches · \(Self.formatDuration(duration))"
                     store.status = message

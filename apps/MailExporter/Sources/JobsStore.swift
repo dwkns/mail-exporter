@@ -389,6 +389,12 @@ final class JobsStore: ObservableObject {
         needsAccessibility = !MailAccessProbe.canAccessAccessibility()
     }
 
+    /// Re-show the Full Disk banner after a real access failure (overrides prior dismiss).
+    func flagFullDiskAccessRequired() {
+        UserDefaults.standard.set(false, forKey: "dismissedFullDiskWarning")
+        needsFullDiskAccess = true
+    }
+
     func switchLocation(to newLocation: StorageLocation, customPath: String? = nil) {
         let previousJobs = jobs
         AppPreferences.shared.storageLocation = newLocation

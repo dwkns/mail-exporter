@@ -322,7 +322,7 @@ struct RunView: View {
                     runningJobID = nil
                     let message = error.localizedDescription
                     if MailAccessProbe.looksLikeFullDiskDenial(message) {
-                        store.needsFullDiskAccess = true
+                        store.flagFullDiskAccessRequired()
                     }
                     markFailed(jobID: jobID, message: message, duration: duration)
                     store.status = message

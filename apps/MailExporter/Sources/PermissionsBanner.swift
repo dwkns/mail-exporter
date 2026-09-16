@@ -2,78 +2,83 @@ import SwiftUI
 
 struct PermissionsBanner: View {
     @EnvironmentObject private var store: JobsStore
+    @AppStorage("dismissedFullDiskWarning") private var dismissedFullDisk: Bool = false
     @AppStorage("dismissedAccessibilityWarning") private var dismissedAccessibility: Bool = false
 
     var body: some View {
-        if store.needsFullDiskAccess {
-            HStack(spacing: 12) {
-                Image(systemName: "lock.shield.fill")
-                    .foregroundStyle(.orange)
-                    .font(.title3)
+        if store.needsFullDiskAccess && !dismissedFullDisk {
+            banner(
+                icon: "lock.shield.fill",
+                tint: .orange,
+                title: "Full Disk Access Required",
+                detail: "MailExporter needs Full Disk Access to read ~/Library/Mail. If the toggle is already on but this banner stays, remove MailExporter from the list (−), add it again (+), then quit and reopen the app.",
+                settings: .fullDiskAccess,
+                onDismiss: { dismissedFullDisk = true }
+            )
+        } else if store.needsAccessibility && !dismissedAccessibility {
+            banner(
+                icon: "hand.raised.fill",
+                tint: .blue,
+                title: "Accessibility Permission Recommended",
+                detail: "Needed to paste rich Markdown formatting into Apple Mail. Safe to dismiss if you only need plain-text drafts.",
+                settings: .accessibility,
+                onDismiss: { dismissedAccessibility = true }
+            )
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Full Disk Access Required")
-                        .font(.subheadline.weight(.semibold))
-                    Text("MailExporter needs Full Disk Access to read exported messages from ~/Library/Mail.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+    @ViewBuilder
+    private func banner(
+        icon: String,
+        tint: Color,
+        title: String,
+        detail: String,
+        settings: PrivacySettingsPane,
+        onDismiss: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+                .font(.title3)
+                .padding(.top, 2)
 
-                Spacer()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 6) {
                 Button("Open Settings…") {
-                    PrivacySettingsPane.fullDiskAccess.open()
+                    settings.open()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
 
                 Button("Check Again") {
-                    store.refreshMailAccess()
-                }
-                .controlSize(.small)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color.orange.opacity(0.12))
-            .overlay(Divider(), alignment: .bottom)
-        } else if store.needsAccessibility && !dismissedAccessibility {
-            HStack(spacing: 12) {
-                Image(systemName: "hand.raised.fill")
-                    .foregroundStyle(.blue)
-                    .font(.title3)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Accessibility Permission Recommended")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Needed to paste rich Markdown formatting into Apple Mail compose windows.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button("Open Settings…") {
-                    PrivacySettingsPane.accessibility.open()
-                }
-                .controlSize(.small)
-
-                Button("Check Again") {
+                    // Re-show if the user dismissed earlier and is re-checking.
+                    if settings == .fullDiskAccess { dismissedFullDisk = false }
+                    if settings == .accessibility { dismissedAccessibility = false }
                     store.refreshMailAccess()
                 }
                 .controlSize(.small)
 
                 Button("Dismiss") {
-                    dismissedAccessibility = true
+                    onDismiss()
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .font(.caption)
-                .padding(.leading, 4)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color.blue.opacity(0.10))
-            .overlay(Divider(), alignment: .bottom)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(tint.opacity(0.12))
+        .overlay(Divider(), alignment: .bottom)
     }
 }

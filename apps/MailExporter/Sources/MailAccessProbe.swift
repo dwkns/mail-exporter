@@ -50,13 +50,23 @@ enum MailAccessProbe {
     static func canAccessMailLibrary() -> Bool {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let mail = home.appendingPathComponent("Library/Mail")
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: mail.path, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
         do {
-            let contents = try FileManager.default.contentsOfDirectory(
+            let contents = try fm.contentsOfDirectory(
                 at: mail,
-                includingPropertiesForKeys: nil,
+                includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
             )
-            return contents.contains { $0.lastPathComponent.hasPrefix("V") }
+            if contents.contains(where: { $0.lastPathComponent.hasPrefix("V") }) {
+                return true
+            }
+            // Some installs only expose PersistenceInfo until a version folder is created;
+            // being able to list the directory at all means Full Disk Access is working.
+            return true
         } catch {
             return false
         }
