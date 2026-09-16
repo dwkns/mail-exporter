@@ -103,9 +103,11 @@ struct RunView: View {
                             onClearTarget: { clearConfirmJob = job },
                             onEdit: { editor = .edit(id: job.id) }
                         )
+                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     }
                 }
                 .listStyle(.inset)
+                .environment(\.defaultMinListRowHeight, 36)
             }
 
             DraftDropZone()
@@ -434,143 +436,90 @@ private struct ExportJobRow: View {
     var onClearTarget: () -> Void
     var onEdit: () -> Void
 
+    private var statusCaption: String {
+        if let progressLabel, isRunningThis {
+            return "Exporting… \(progressLabel)"
+        }
+        if let result {
+            return result.summary
+        }
+        switch folderStatus {
+        case .exists:
+            return job.outputDir
+        case .moved(let suggestedURL):
+            return "Folder moved to \(suggestedURL.path)"
+        case .inTrash:
+            return "Folder is in Trash"
+        case .notFound(let candidateURL):
+            if let candidate = candidateURL {
+                return "Folder not found — match: \(candidate.path)"
+            }
+            return "Folder not found"
+        }
+    }
+
+    private var statusColor: Color {
+        if isRunningThis { return .secondary }
+        switch folderStatus {
+        case .exists:
+            return .secondary
+        case .moved:
+            return .orange
+        case .inTrash, .notFound:
+            return .red
+        }
+    }
+
+    private var detailsText: String {
+        if let result { return result.detail }
+        return statusCaption
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(job.name)
-                    .font(.body.weight(.medium))
-
-                switch folderStatus {
-                case .exists:
-                    Text("To: \(job.outputDir)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                case .moved(let suggestedURL):
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            Text("Folder moved to: \(suggestedURL.path)")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        HStack(spacing: 8) {
-                            Button("Use Found Location") {
-                                onUseFoundLocation(suggestedURL)
-                            }
-                            .font(.caption)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-
-                            Button("Choose Other…") {
-                                onChooseFolder()
-                            }
-                            .font(.caption)
-                            .controlSize(.small)
-                        }
-                    }
-
-                case .inTrash(let trashURL):
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trash.fill")
-                                .foregroundStyle(.red)
-                            Text("Folder was moved to Trash: \(job.outputDir)")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        HStack(spacing: 8) {
-                            Button("Choose New Folder…") {
-                                onChooseFolder()
-                            }
-                            .font(.caption)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-
-                            Button("Reveal in Trash") {
-                                NSWorkspace.shared.activateFileViewerSelecting([trashURL])
-                            }
-                            .font(.caption)
-                            .controlSize(.small)
-                        }
-                    }
-
-                case .notFound(let candidateURL):
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
-                            Text("Folder not found: \(job.outputDir)")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        HStack(spacing: 8) {
-                            if let candidate = candidateURL {
-                                Text("Found match: \(candidate.path)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Button("Use This Folder") {
-                                    onUseFoundLocation(candidate)
-                                }
-                                .font(.caption)
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                            }
-                            Button("Choose Folder…") {
-                                onChooseFolder()
-                            }
-                            .font(.caption)
-                            .controlSize(.small)
-                        }
-                    }
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                if case .moved = folderStatus {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                } else if case .inTrash = folderStatus {
+                    Image(systemName: "trash.fill")
+                        .foregroundStyle(.red)
+                } else if case .notFound = folderStatus {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
                 }
 
-                if let progressLabel, isRunningThis {
-                    Text("Exporting… \(progressLabel)")
+                Text(job.name)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+
+                Text(statusCaption)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .monospacedDigit()
+                    .layoutPriority(-1)
+
+                Button {
+                    isDetailsOpen.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } else if let result {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 4) {
-                            Text(result.summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Details")
+                .popover(isPresented: $isDetailsOpen, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ScrollView {
+                            Text(detailsText)
+                                .font(.system(.caption, design: .monospaced))
                                 .textSelection(.enabled)
-                            Button {
-                                isDetailsOpen.toggle()
-                            } label: {
-                                Image(systemName: "info.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Details")
-                            .popover(isPresented: $isDetailsOpen, arrowEdge: .bottom) {
-                                ScrollView {
-                                    Text(result.detail)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(12)
-                                }
-                                .frame(minWidth: 360, idealWidth: 420, maxWidth: 520, minHeight: 120, maxHeight: 320)
-                            }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if let pane = MailAccessProbe.settingsPane(
-                            for: result.summary + "\n" + result.detail
-                        ) {
+                        .frame(minWidth: 360, idealWidth: 420, maxWidth: 520, minHeight: 80, maxHeight: 280)
+                        if let pane = MailAccessProbe.settingsPane(for: detailsText) {
                             Button(pane.buttonTitle) {
                                 pane.open()
                             }
@@ -578,12 +527,17 @@ private struct ExportJobRow: View {
                             .font(.caption)
                         }
                     }
+                    .padding(12)
                 }
+                .opacity(result != nil || isRunningThis ? 1 : 0)
+                .disabled(result == nil && !isRunningThis)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture(count: 2, perform: onEdit)
             .help("Double-click to edit")
+
+            inlineRecoveryButtons
 
             if folderStatus.isValidForExport {
                 Button("Show in Finder", action: onShowInFinder)
@@ -600,14 +554,21 @@ private struct ExportJobRow: View {
                     .disabled(busy)
             }
 
-            Button(action: onExport) {
-                Text("Export")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(busy || !folderStatus.isValidForExport)
-            .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
+            Button("Export", action: onExport)
+                .buttonStyle(.borderedProminent)
+                .disabled(busy || !folderStatus.isValidForExport)
+                .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
         }
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 36, alignment: .center)
+        .overlay(alignment: .bottom) {
+            if isRunningThis {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .frame(height: 2)
+                    .padding(.horizontal, 2)
+            }
+        }
+        .clipped()
         .contextMenu {
             Button("Export") {
                 onExport()
@@ -621,6 +582,33 @@ private struct ExportJobRow: View {
             }
 
             Button("Edit", action: onEdit)
+        }
+    }
+
+    @ViewBuilder
+    private var inlineRecoveryButtons: some View {
+        switch folderStatus {
+        case .moved(let suggestedURL):
+            Button("Use Found") {
+                onUseFoundLocation(suggestedURL)
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+        case .inTrash(let trashURL):
+            Button("Reveal in Trash") {
+                NSWorkspace.shared.activateFileViewerSelecting([trashURL])
+            }
+            .controlSize(.small)
+        case .notFound(let candidateURL):
+            if let candidate = candidateURL {
+                Button("Use Match") {
+                    onUseFoundLocation(candidate)
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+            }
+        case .exists:
+            EmptyView()
         }
     }
 }
