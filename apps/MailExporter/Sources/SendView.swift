@@ -51,20 +51,6 @@ struct DraftDropZone: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            HStack {
-                Button("Choose Files…") {
-                    chooseFiles()
-                }
-                .disabled(runner.busy)
-                Spacer()
-                if runner.busy {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Opening drafts…")
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -129,7 +115,22 @@ struct DraftDropZone: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Button("Choose Files…") {
+                        chooseFiles()
+                    }
+                    .disabled(runner.busy)
+                    if runner.busy {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Opening drafts…")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                    }
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

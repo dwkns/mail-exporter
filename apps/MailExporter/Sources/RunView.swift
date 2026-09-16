@@ -687,11 +687,13 @@ private struct ExportJobRow: View {
                 JobGlyph(symbol: glyphSymbol, tint: glyphTint)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .center, spacing: 7) {
                         Text(job.name)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(minWidth: 0)
 
                         if isRunningThis {
                             ProgressView()
@@ -701,15 +703,16 @@ private struct ExportJobRow: View {
                                 .help("This export is running")
                         }
 
-                        Spacer(minLength: 8)
-
                         if let statusText {
                             Text(statusText)
                                 .font(.system(size: 12, weight: .medium).monospacedDigit())
                                 .foregroundStyle(statusColor)
                                 .lineLimit(1)
-                                .truncationMode(.tail)
-                                .layoutPriority(-1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+
+                        if result != nil, !isRunningThis {
+                            detailsButton
                         }
                     }
 
@@ -724,19 +727,16 @@ private struct ExportJobRow: View {
                     .lineLimit(1)
                     .help(job.outputDir)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture(count: 2, perform: onEdit)
             .help("Double-click to edit this export")
 
-            if result != nil, !isRunningThis {
-                detailsButton
-            }
-
-            inlineRecoveryButtons
-
             HStack(spacing: 8) {
+                inlineRecoveryButtons
+
                 if folderStatus.isValidForExport {
                     Button(action: onShowInFinder) {
                         Label("Show in Finder", systemImage: "folder")
@@ -760,6 +760,8 @@ private struct ExportJobRow: View {
                     .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
             }
             .controlSize(.regular)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.leading, 14)
         .padding(.trailing, 14)
