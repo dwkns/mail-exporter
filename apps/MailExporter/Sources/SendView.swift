@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct DraftDropZone: View {
     @ObservedObject private var inbox = ComposeInbox.shared
     @ObservedObject private var runner = ComposeRunner.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isTargeted = false
 
     private static let timeFormatter: DateFormatter = {
@@ -95,9 +96,7 @@ struct DraftDropZone: View {
     private var dropZone: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isTargeted
-                    ? Color.accentColor.opacity(0.12)
-                    : Color(nsColor: .controlBackgroundColor))
+                .fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(
                     isTargeted ? Color.accentColor : Color(nsColor: .separatorColor).opacity(0.55),
@@ -138,6 +137,10 @@ struct DraftDropZone: View {
         .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
         }
+    }
+
+    private var dropWellFill: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.28 : 0.08)
     }
 
     private func chooseFiles() {

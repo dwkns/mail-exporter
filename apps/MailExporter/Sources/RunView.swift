@@ -82,8 +82,8 @@ struct RunView: View {
         }
     }
 
-    private var hasAnyMissingFolder: Bool {
-        store.jobs.contains { !store.folderStatus(for: $0).isValidForExport }
+    private var hasExportableJob: Bool {
+        store.jobs.contains { store.folderStatus(for: $0).isValidForExport }
     }
 
     private var header: some View {
@@ -114,13 +114,17 @@ struct RunView: View {
                 symbol: "tray.and.arrow.down.fill",
                 tint: .accentColor,
                 style: .prominent,
-                enabled: !busy && !store.jobs.isEmpty && !hasAnyMissingFolder,
+                enabled: !busy && hasExportableJob,
                 spinning: busy
             ) {
                 run(jobID: nil)
             }
             .keyboardShortcut(.defaultAction)
-            .help(hasAnyMissingFolder ? "One or more exports have a missing folder" : "Export all jobs")
+            .help(
+                !hasExportableJob
+                    ? "Choose a valid folder before exporting"
+                    : "Export all jobs that have a folder"
+            )
             .accessibilityLabel(busy ? "Exporting" : "Export all")
         }
         .padding(.horizontal, 20)
@@ -317,10 +321,14 @@ struct RunView: View {
             }
         }
 
-        let targetJobs = (jobID != nil) ? store.jobs.filter { $0.id == jobID } : store.jobs
-        for job in targetJobs {
+        let requested = (jobID != nil) ? store.jobs.filter { $0.id == jobID } : store.jobs
+        var targetJobs: [ExportJob] = []
+        for job in requested {
             let status = store.folderStatus(for: job)
-            if !status.isValidForExport {
+            if status.isValidForExport {
+                targetJobs.append(job)
+                try? store.prepareOutputDirectory(for: job)
+            } else if jobID != nil {
                 let alert = NSAlert()
                 alert.messageText = "Cannot Export “\(job.name)”"
                 alert.informativeText = "The target export folder was not found:\n\(job.outputDir)\n\nPlease choose a valid export folder before exporting."
@@ -329,7 +337,15 @@ struct RunView: View {
                 store.status = "Export cancelled: folder missing for “\(job.name)”"
                 return
             }
-            try? store.prepareOutputDirectory(for: job)
+        }
+        if targetJobs.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Nothing to Export"
+            alert.informativeText = "Every export is missing its folder. Choose a folder first."
+            alert.alertStyle = .warning
+            alert.runModal()
+            store.status = "Export cancelled: no valid folders"
+            return
         }
 
         store.save()
@@ -338,18 +354,31 @@ struct RunView: View {
         startTicker()
         let root = store.projectRoot
         let config = store.configURL
-        var args = ["export"]
-        if let jobID {
-            args += ["--job-id", jobID]
-        }
         let started = Date()
+        let exportAllJobs = jobID == nil && targetJobs.count == store.jobs.count
+        let jobIDs = targetJobs.map(\.id)
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let result = try EngineBridge.run(
-                    projectRoot: root,
-                    arguments: args,
-                    configPath: config
-                )
+                let result: EngineResult
+                if exportAllJobs {
+                    result = try EngineBridge.run(
+                        projectRoot: root,
+                        arguments: ["export"],
+                        configPath: config
+                    )
+                } else if jobIDs.count == 1 {
+                    result = try EngineBridge.run(
+                        projectRoot: root,
+                        arguments: ["export", "--job-id", jobIDs[0]],
+                        configPath: config
+                    )
+                } else {
+                    result = try Self.runJobsInSequence(
+                        ids: jobIDs,
+                        projectRoot: root,
+                        configPath: config
+                    )
+                }
                 let duration = Date().timeIntervalSince(started)
                 DispatchQueue.main.async {
                     stopTicker()
@@ -377,6 +406,52 @@ struct RunView: View {
                 }
             }
         }
+    }
+
+    private static func runJobsInSequence(
+        ids: [String],
+        projectRoot: URL,
+        configPath: URL
+    ) throws -> EngineResult {
+        var lines: [String] = []
+        var chunks: [[String: Any]] = []
+        var ok = true
+        var matchCount = 0
+        for id in ids {
+            let piece = try EngineBridge.run(
+                projectRoot: projectRoot,
+                arguments: ["export", "--job-id", id],
+                configPath: configPath
+            )
+            if !piece.line.isEmpty { lines.append(piece.line) }
+            ok = ok && piece.ok
+            matchCount += piece.matchCount ?? 0
+            if let data = piece.rawJSON.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let results = obj["results"] as? [[String: Any]]
+            {
+                chunks.append(contentsOf: results)
+            }
+        }
+        let payload: [String: Any] = [
+            "results": chunks,
+            "line": lines.joined(separator: " — "),
+            "ok": ok,
+        ]
+        let raw: String
+        if let data = try? JSONSerialization.data(withJSONObject: payload),
+           let text = String(data: data, encoding: .utf8)
+        {
+            raw = text
+        } else {
+            raw = lines.joined(separator: "\n")
+        }
+        return EngineResult(
+            line: lines.joined(separator: " — "),
+            ok: ok,
+            rawJSON: raw,
+            matchCount: matchCount
+        )
     }
 
     private func recordDuration(_ duration: TimeInterval, jobID: String?) {
@@ -548,11 +623,14 @@ private struct HeaderActionButton: View {
                             : Color.white.opacity(0.18),
                         lineWidth: 1
                     )
+                    .allowsHitTesting(false)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.white.opacity(hovering && enabled ? 0.10 : 0))
+                    .allowsHitTesting(false)
             )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .opacity(enabled ? 1 : 0.42)
@@ -755,6 +833,7 @@ private struct ExportJobRow: View {
 
                 Button("Export", action: onExport)
                     .buttonStyle(.borderedProminent)
+                    .contentShape(Rectangle())
                     .accessibilityLabel("Export")
                     .disabled(busy || !folderStatus.isValidForExport)
                     .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
