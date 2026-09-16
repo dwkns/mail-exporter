@@ -102,6 +102,7 @@ struct RunView: View {
             } label: {
                 Label("Add Export", systemImage: "plus")
             }
+            .accessibilityLabel("Add Export")
             .disabled(busy)
             Button {
                 run(jobID: nil)
@@ -109,6 +110,7 @@ struct RunView: View {
                 Text(busy ? "Exporting…" : "Export All")
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityLabel(busy ? "Exporting" : "Export All")
             .disabled(busy || store.jobs.isEmpty || hasAnyMissingFolder)
             .keyboardShortcut(.defaultAction)
             .help(hasAnyMissingFolder ? "One or more exports have a missing folder" : "Export all jobs")
@@ -647,9 +649,11 @@ private struct ExportJobRow: View {
                     Button(action: onShowInFinder) {
                         Label("Show in Finder", systemImage: "folder")
                     }
+                    .accessibilityLabel("Show in Finder")
                     .help("Reveal the export folder in Finder")
                 } else {
                     Button("Choose Folder…", action: onChooseFolder)
+                        .accessibilityLabel("Choose Folder")
                 }
 
                 if debugMode && folderStatus.isValidForExport {
@@ -659,6 +663,7 @@ private struct ExportJobRow: View {
 
                 Button("Export", action: onExport)
                     .buttonStyle(.borderedProminent)
+                    .accessibilityLabel("Export")
                     .disabled(busy || !folderStatus.isValidForExport)
                     .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
             }
