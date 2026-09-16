@@ -44,11 +44,19 @@ struct RunView: View {
             } else {
                 jobList
             }
-            DraftDropZone()
+            footer
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDisappear { stopTicker() }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterNewExport)) { _ in
+            guard !busy else { return }
+            editor = .add
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterExportAll)) { _ in
+            guard !busy, hasExportableJob else { return }
+            run(jobID: nil)
+        }
         .sheet(item: $editor) { item in
             JobEditorSheet(
                 presentation: item,
@@ -106,9 +114,18 @@ struct RunView: View {
             ) {
                 editor = .add
             }
-            .help("Add a new export")
+            .help("New export (⌘N)")
             .accessibilityLabel("New export")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+    }
 
+    private var footer: some View {
+        HStack(alignment: .bottom, spacing: 16) {
+            DraftDropZone()
+            Spacer(minLength: 12)
             HeaderActionButton(
                 title: busy ? "Exporting…" : "Export",
                 symbol: "tray.and.arrow.down.fill",
@@ -119,17 +136,20 @@ struct RunView: View {
             ) {
                 run(jobID: nil)
             }
-            .keyboardShortcut(.defaultAction)
             .help(
                 !hasExportableJob
                     ? "Choose a valid folder before exporting"
-                    : "Export all jobs that have a folder"
+                    : "Export all jobs that have a folder (⌘E)"
             )
             .accessibilityLabel(busy ? "Exporting" : "Export all")
         }
         .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .top) {
+            Divider()
+        }
     }
 
     private var emptyState: some View {
@@ -152,7 +172,7 @@ struct RunView: View {
             ) {
                 editor = .add
             }
-            .help("Add a new export")
+            .help("New export (⌘N)")
             .accessibilityLabel("New export")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

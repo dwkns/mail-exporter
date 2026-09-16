@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    static let mailExporterNewExport = Notification.Name("mailExporterNewExport")
+    static let mailExporterExportAll = Notification.Name("mailExporterExportAll")
+}
+
 @main
 struct MailExporterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -20,7 +25,19 @@ struct MailExporterApp: App {
         // (matching: [] left the window behind on cold-start drops.)
         .handlesExternalEvents(matching: ["*"])
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("New Export") {
+                    NotificationCenter.default.post(name: .mailExporterNewExport, object: nil)
+                }
+                .keyboardShortcut("n")
+            }
+            CommandGroup(after: .newItem) {
+                Button("Export All") {
+                    NotificationCenter.default.post(name: .mailExporterExportAll, object: nil)
+                }
+                .keyboardShortcut("e")
+                .disabled(store.jobs.isEmpty)
+            }
             CommandGroup(replacing: .importExport) {
                 Button("Import Settings…") {
                     store.promptImportSettings()

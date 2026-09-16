@@ -20,13 +20,11 @@ struct DraftDropZone: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 dropZone
-                    .frame(minHeight: 88)
-                    .frame(maxWidth: .infinity, maxHeight: 120)
+                    .frame(width: 480, height: 96)
 
                 if !inbox.recentDrops.isEmpty {
                     recentDropsPanel
-                        .frame(width: 220)
-                        .frame(maxHeight: 120)
+                        .frame(width: 196, height: 96)
                 }
             }
 
@@ -50,16 +48,10 @@ struct DraftDropZone: View {
                     }
                 }
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: 480, alignment: .leading)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .top) {
-            Divider()
-        }
+        .frame(maxWidth: 692, alignment: .leading)
         .onAppear { runner.drainInbox() }
         .onChange(of: inbox.generation) { _ in runner.drainInbox() }
         .onChange(of: runner.busy) { isBusy in
