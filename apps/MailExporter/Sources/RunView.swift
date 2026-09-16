@@ -103,11 +103,11 @@ struct RunView: View {
                             onClearTarget: { clearConfirmJob = job },
                             onEdit: { editor = .edit(id: job.id) }
                         )
-                        .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                     }
                 }
                 .listStyle(.inset)
-                .environment(\.defaultMinListRowHeight, 56)
+                .environment(\.defaultMinListRowHeight, 48)
             }
 
             DraftDropZone()
@@ -437,10 +437,7 @@ private struct ExportJobRow: View {
     var onEdit: () -> Void
 
     private var statusCaption: String {
-        if let progressLabel, isRunningThis {
-            return "Exporting… \(progressLabel)"
-        }
-        if let result {
+        if let result, !isRunningThis {
             return result.summary
         }
         switch folderStatus {
@@ -476,7 +473,7 @@ private struct ExportJobRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             HStack(spacing: 8) {
                 if case .moved = folderStatus {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -490,15 +487,20 @@ private struct ExportJobRow: View {
                 }
 
                 Text(job.name)
-                    .font(.headline)
+                    .font(.body.weight(.semibold))
                     .lineLimit(1)
+
+                if isRunningThis {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help(progressLabel.map { "Exporting… \($0)" } ?? "Exporting…")
+                }
 
                 Text(statusCaption)
                     .font(.caption)
                     .foregroundStyle(statusColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .monospacedDigit()
                     .layoutPriority(-1)
 
                 Button {
@@ -529,8 +531,8 @@ private struct ExportJobRow: View {
                     }
                     .padding(12)
                 }
-                .opacity(result != nil || isRunningThis ? 1 : 0)
-                .disabled(result == nil && !isRunningThis)
+                .opacity(result != nil && !isRunningThis ? 1 : 0)
+                .disabled(result == nil || isRunningThis)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -562,16 +564,7 @@ private struct ExportJobRow: View {
             }
             .controlSize(.regular)
         }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-        .overlay(alignment: .bottom) {
-            if isRunningThis {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .frame(height: 3)
-                    .padding(.horizontal, 4)
-            }
-        }
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .center)
         .contextMenu {
             Button("Export") {
                 onExport()
