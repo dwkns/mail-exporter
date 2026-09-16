@@ -189,6 +189,10 @@ PLIST
 # Without a profile, launchd rejects the app ("can't be opened", error 163) even
 # when signed with Apple Development. Opt in via INCLUDE_ICLOUD_ENTITLEMENTS=1
 # once the App ID has iCloud and a matching .mobileprovision / Mac profile.
+# Sign from a generated copy under build/ (gitignored). Never write back onto
+# the tracked MailExporter.entitlements — that re-dirties the tree after every
+# local build. Default signing uses the checked-in helper-only file; iCloud
+# keys are generated only when INCLUDE_ICLOUD_ENTITLEMENTS=1.
 ENT_FILE="${ROOT}/build/MailExporter.entitlements"
 INCLUDE_ICLOUD="${INCLUDE_ICLOUD_ENTITLEMENTS:-0}"
 if [[ "${INCLUDE_ICLOUD}" == "1" && "${SIGN_IDENTITY}" != "-" ]]; then
@@ -218,27 +222,13 @@ if [[ "${INCLUDE_ICLOUD}" == "1" && "${SIGN_IDENTITY}" != "-" ]]; then
 ENT
   echo "Developer signing with iCloud entitlements (INCLUDE_ICLOUD_ENTITLEMENTS=1)."
 else
-  cat > "${ENT_FILE}" <<'ENT'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-  <true/>
-  <key>com.apple.security.cs.disable-library-validation</key>
-  <true/>
-</dict>
-</plist>
-ENT
+  cp "${ROOT}/MailExporter.entitlements" "${ENT_FILE}"
   if [[ "${SIGN_IDENTITY}" == "-" ]]; then
     echo "Ad-hoc signing: omitting iCloud entitlements (jobs.json uses local Application Support)."
   else
     echo "Developer signing without iCloud entitlements (set INCLUDE_ICLOUD_ENTITLEMENTS=1 when App ID + profile are ready)."
   fi
 fi
-
-# Keep a checked-in copy for reference / Xcode import later
-cp "${ENT_FILE}" "${ROOT}/MailExporter.entitlements"
 
 echo "Compiling Swift UI…"
 swiftc \
