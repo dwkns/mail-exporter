@@ -37,8 +37,7 @@ open apps/MailExporter/MailExporter.app
 
 The build produces a self-contained app: Swift UI plus a bundled `MailExporterEngine` (no Homebrew Python or `rg` at runtime).
 
-- **Config** — add jobs, set the output folder, add match clauses (From / To / Subject / Body / Date), preview match count
-- **Run** — export one job or all; one-line result plus a notification
+- **Export** — one pane: job list (scrolls) plus an always-visible drop zone at the bottom. Add/Edit open a sheet. Drop Markdown to open an Apple Mail **draft** (never sends).
 
 Jobs are stored at:
 
@@ -282,6 +281,6 @@ python3 -m unittest tests.test_criteria -v
 
 | Path | Purpose |
 |------|---------|
-| [`apps/MailExporter/`](apps/MailExporter/) | Native Mac app (Config + Run) |
+| [`apps/MailExporter/`](apps/MailExporter/) | Native Mac app (single Export pane) |
 | [`engine/`](engine/) | Python export engine (criteria matching, `.emlx` + attachments) |
 | [`mailexporter_mcp/`](mailexporter_mcp/) | Local MCP server for Cursor / Claude / Cowork |

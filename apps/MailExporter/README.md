@@ -13,7 +13,10 @@ Produces a **self-contained** app: Swift UI + bundled `MailExporterEngine` (no H
 
 Enable **only MailExporter** in System Settings → Privacy & Security → Full Disk Access, then quit and reopen the app.
 
-## Tabs
+## Window
 
-- **Config** — create/edit jobs and criteria; preview match count
-- **Run** — export; shows `Name: N copied` and posts a notification
+One **Export** pane:
+
+- Job list (scrolls if needed) with **Export**, **Show in Finder**, and **Edit** per job
+- **Add Export** opens a sheet for criteria, output folder, include sent/bin, and name
+- Always-visible drop zone at the bottom: Markdown → Apple Mail draft (never sends)

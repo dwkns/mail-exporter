@@ -15,14 +15,13 @@ struct DroppedFileRecord: Identifiable, Equatable {
 }
 
 /// Queues Markdown files opened via Dock/Finder drop onto the app icon
-/// (or `open -a`), so Send Messages can compose them.
+/// (or `open -a`), so the Export pane drop zone can compose them.
 final class ComposeInbox: ObservableObject {
     static let shared = ComposeInbox()
 
     @Published private(set) var pendingURLs: [URL] = []
-    /// Bumped so SendView re-processes even if the same paths are dropped again.
+    /// Bumped so the drop zone re-processes even if the same paths are dropped again.
     @Published private(set) var generation: UInt = 0
-    @Published var wantsSendTab = false
     /// Most recent drop / choose / open batch (newest first), capped.
     @Published private(set) var recentDrops: [DroppedFileRecord] = []
 
@@ -38,7 +37,6 @@ final class ComposeInbox: ObservableObject {
             // Append — never replace an undrained batch.
             self.pendingURLs.append(contentsOf: md)
             self.generation &+= 1
-            self.wantsSendTab = true
         }
         if Thread.isMainThread {
             apply()
@@ -47,7 +45,7 @@ final class ComposeInbox: ObservableObject {
         }
     }
 
-    /// Record files chosen/dropped inside the Send tab (no pending queue).
+    /// Record files chosen/dropped on the Export pane drop zone (no pending queue).
     func recordDrops(_ urls: [URL]) {
         let md = Self.markdownURLs(from: urls)
         guard !md.isEmpty else { return }
@@ -72,7 +70,7 @@ final class ComposeInbox: ObservableObject {
     }
 }
 
-/// Always-on composer so Dock/Finder drops work even before Send Messages is visible.
+/// Always-on composer so Dock/Finder drops work even before the Export pane is visible.
 final class ComposeRunner: ObservableObject {
     static let shared = ComposeRunner()
 

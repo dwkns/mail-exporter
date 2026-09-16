@@ -25,7 +25,6 @@ private enum DurationFormat {
 struct RunView: View {
     @EnvironmentObject private var store: JobsStore
     @EnvironmentObject private var prefs: AppPreferences
-    var onEditMailbox: (String) -> Void = { _ in }
     @State private var busy = false
     @State private var openDetailsID: String?
     @State private var sessionResults: [String: SessionExportResult] = [:]
@@ -35,10 +34,10 @@ struct RunView: View {
     @State private var runningJobID: String?
     @State private var tick: Timer?
     @State private var clearConfirmJob: ExportJob?
-    @State private var removeConfirmJob: ExportJob?
+    @State private var editor: JobEditorPresentation?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center) {
                 Text("Export")
                     .font(.title2.weight(.semibold))
@@ -50,20 +49,34 @@ struct RunView: View {
                         .monospacedDigit()
                 }
                 Button {
+                    editor = .add
+                } label: {
+                    Label("Add Export", systemImage: "plus")
+                }
+                .disabled(busy)
+                Button {
                     run(jobID: nil)
                 } label: {
                     Text(busy ? "Exporting…" : "Export All")
                 }
                 .disabled(busy || store.jobs.isEmpty || hasAnyMissingFolder)
                 .keyboardShortcut(.defaultAction)
-                .help(hasAnyMissingFolder ? "One or more mailboxes have a missing export folder" : "Export all mailboxes")
+                .help(hasAnyMissingFolder ? "One or more exports have a missing folder" : "Export all jobs")
             }
-            .padding(.top, 4)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
 
             if store.jobs.isEmpty {
-                Text("No mailboxes yet. Add one in the Mailboxes tab.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("No exports yet.")
+                        .foregroundStyle(.secondary)
+                    Button("Add Export") {
+                        editor = .add
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 16)
             } else {
                 List {
                     ForEach(store.jobs) { job in
@@ -88,17 +101,29 @@ struct RunView: View {
                                 store.updateOutputDir(for: job.id, newPath: url.path)
                             },
                             onClearTarget: { clearConfirmJob = job },
-                            onRemoveMailbox: { removeConfirmJob = job },
-                            onEditMailbox: { onEditMailbox(job.id) }
+                            onEdit: { editor = .edit(id: job.id) }
                         )
                     }
                 }
                 .listStyle(.inset)
             }
+
+            DraftDropZone()
         }
-        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDisappear { stopTicker() }
+        .sheet(item: $editor) { item in
+            JobEditorSheet(
+                presentation: item,
+                initialJob: {
+                    if case .edit(let jobID) = item {
+                        return store.jobs.first { $0.id == jobID }
+                    }
+                    return nil
+                }()
+            )
+            .environmentObject(store)
+        }
         .confirmationDialog(
             "Clear Target Folder?",
             isPresented: Binding(
@@ -117,38 +142,6 @@ struct RunView: View {
             Text(
                 "Delete all exported .eml files in:\n\(job.outputDir)\n\nThe next export will rewrite every matching message."
             )
-        }
-        .confirmationDialog(
-            "Remove Mailbox?",
-            isPresented: Binding(
-                get: { removeConfirmJob != nil },
-                set: { if !$0 { removeConfirmJob = nil } }
-            ),
-            presenting: removeConfirmJob
-        ) { job in
-            Button("Remove Mailbox", role: .destructive) {
-                removeMailbox(job)
-            }
-            Button("Cancel", role: .cancel) {
-                removeConfirmJob = nil
-            }
-        } message: { job in
-            Text(
-                "Are you sure you want to remove “\(job.name)” from MailExporter?\n\nExported emails in \(job.outputDir) will not be deleted."
-            )
-        }
-    }
-
-    private func removeMailbox(_ job: ExportJob) {
-        removeConfirmJob = nil
-        store.deleteJob(id: job.id)
-        sessionResults.removeValue(forKey: job.id)
-        lastDurations.removeValue(forKey: job.id)
-        if openDetailsID == job.id {
-            openDetailsID = nil
-        }
-        if runningJobID == job.id {
-            runningJobID = nil
         }
     }
 
@@ -439,8 +432,7 @@ private struct ExportJobRow: View {
     var onChooseFolder: () -> Void
     var onUseFoundLocation: (URL) -> Void
     var onClearTarget: () -> Void
-    var onRemoveMailbox: () -> Void
-    var onEditMailbox: () -> Void
+    var onEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -480,12 +472,6 @@ private struct ExportJobRow: View {
                             }
                             .font(.caption)
                             .controlSize(.small)
-
-                            Button("Remove Mailbox", role: .destructive) {
-                                onRemoveMailbox()
-                            }
-                            .font(.caption)
-                            .controlSize(.small)
                         }
                     }
 
@@ -510,12 +496,6 @@ private struct ExportJobRow: View {
 
                             Button("Reveal in Trash") {
                                 NSWorkspace.shared.activateFileViewerSelecting([trashURL])
-                            }
-                            .font(.caption)
-                            .controlSize(.small)
-
-                            Button("Remove Mailbox", role: .destructive) {
-                                onRemoveMailbox()
                             }
                             .font(.caption)
                             .controlSize(.small)
@@ -547,8 +527,8 @@ private struct ExportJobRow: View {
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                             }
-                            Button("Remove Mailbox", role: .destructive) {
-                                onRemoveMailbox()
+                            Button("Choose Folder…") {
+                                onChooseFolder()
                             }
                             .font(.caption)
                             .controlSize(.small)
@@ -602,8 +582,8 @@ private struct ExportJobRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2, perform: onEditMailbox)
-            .help("Double-click to edit in Mailboxes")
+            .onTapGesture(count: 2, perform: onEdit)
+            .help("Double-click to edit")
 
             if folderStatus.isValidForExport {
                 Button("Show in Finder", action: onShowInFinder)
@@ -612,22 +592,20 @@ private struct ExportJobRow: View {
                     .buttonStyle(.bordered)
             }
 
+            Button("Edit", action: onEdit)
+                .disabled(busy)
+
             if debugMode && folderStatus.isValidForExport {
                 Button("Clear Target", role: .destructive, action: onClearTarget)
                     .disabled(busy)
             }
 
-            Button(role: .destructive, action: onRemoveMailbox) {
-                Label("Remove", systemImage: "trash")
-            }
-            .help("Remove Mailbox")
-            .disabled(busy)
-
             Button(action: onExport) {
                 Text("Export")
             }
+            .buttonStyle(.borderedProminent)
             .disabled(busy || !folderStatus.isValidForExport)
-            .help(folderStatus.isValidForExport ? "Export this mailbox" : "Choose a valid folder before exporting")
+            .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
         }
         .padding(.vertical, 4)
         .contextMenu {
@@ -642,11 +620,7 @@ private struct ExportJobRow: View {
                 Button("Choose Folder…", action: onChooseFolder)
             }
 
-            Button("Edit in Mailboxes", action: onEditMailbox)
-
-            Divider()
-
-            Button("Remove Mailbox", role: .destructive, action: onRemoveMailbox)
+            Button("Edit", action: onEdit)
         }
     }
 }

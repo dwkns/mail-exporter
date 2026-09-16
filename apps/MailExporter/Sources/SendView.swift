@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct SendView: View {
+/// Always-visible Markdown → Apple Mail draft drop zone (never sends).
+struct DraftDropZone: View {
     @ObservedObject private var inbox = ComposeInbox.shared
     @ObservedObject private var runner = ComposeRunner.shared
     @State private var isTargeted = false
@@ -15,32 +16,27 @@ struct SendView: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Send Messages")
-                .font(.title2.weight(.semibold))
-                .padding(.top, 4)
-
-            Text("Drop Markdown email files here, or onto the MailExporter app icon. With In-Reply-To set, MailExporter replies when it can find that message.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(alignment: .top, spacing: 16) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
                 dropZone
-                    .frame(maxWidth: .infinity, minHeight: 220)
-                    .frame(maxHeight: .infinity)
+                    .frame(minHeight: 88)
+                    .frame(maxWidth: .infinity, maxHeight: 120)
 
-                recentDropsPanel
-                    .frame(width: 280)
-                    .frame(maxHeight: .infinity)
+                if !inbox.recentDrops.isEmpty {
+                    recentDropsPanel
+                        .frame(width: 220)
+                        .frame(maxHeight: 120)
+                }
             }
 
             if let lastResult = runner.lastResult {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(lastResult.summary)
-                        .font(.body.weight(.medium))
+                        .font(.callout.weight(.medium))
                     Text(lastResult.detail)
                         .font(.caption)
                         .foregroundStyle(lastResult.ok ? Color.secondary : Color.primary)
+                        .lineLimit(4)
                         .textSelection(.enabled)
                     if let pane = MailAccessProbe.settingsPane(
                         for: lastResult.summary + "\n" + lastResult.detail
@@ -49,26 +45,11 @@ struct SendView: View {
                             pane.open()
                         }
                         .buttonStyle(.link)
+                        .font(.caption)
                     }
                 }
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if !runner.statusLines.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(runner.statusLines, id: \.self) { line in
-                            Text(line)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 100)
             }
 
             HStack {
@@ -85,8 +66,13 @@ struct SendView: View {
                 }
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .top) {
+            Divider()
+        }
         .onAppear { runner.drainInbox() }
         .onChange(of: inbox.generation) { _ in runner.drainInbox() }
         .onChange(of: runner.busy) { isBusy in
@@ -95,71 +81,58 @@ struct SendView: View {
     }
 
     private var recentDropsPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Recent files")
-                .font(.headline)
-            if inbox.recentDrops.isEmpty {
-                Text("Dropped or chosen .md files will appear here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            } else {
-                List {
-                    ForEach(inbox.recentDrops) { item in
-                        VStack(alignment: .leading, spacing: 2) {
+                .font(.caption.weight(.semibold))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(inbox.recentDrops.prefix(6)) { item in
+                        VStack(alignment: .leading, spacing: 0) {
                             Text(item.name)
-                                .font(.caption.weight(.medium))
-                                .lineLimit(2)
-                                .textSelection(.enabled)
+                                .font(.caption)
+                                .lineLimit(1)
                             Text(Self.timeFormatter.string(from: item.droppedAt))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            Text(item.url.deletingLastPathComponent().path)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
                         }
-                        .padding(.vertical, 2)
                     }
                 }
-                .listStyle(.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(10)
+        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var dropZone: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .fill(isTargeted
                     ? Color.accentColor.opacity(0.12)
                     : Color(nsColor: .controlBackgroundColor))
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(
                     isTargeted ? Color.accentColor : Color(nsColor: .separatorColor),
                     style: StrokeStyle(lineWidth: isTargeted ? 2 : 1, dash: isTargeted ? [] : [7, 5])
                 )
 
-            VStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: "envelope.badge")
-                    .font(.system(size: 36, weight: .regular))
+                    .font(.system(size: 28, weight: .regular))
                     .foregroundStyle(isTargeted ? Color.accentColor : .secondary)
-                Text(runner.busy ? "Working…" : "Drop .md email files here")
-                    .font(.headline)
-                Text("Same format as Make Mail Draft — front matter + Markdown body")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(runner.busy ? "Working…" : "Drop .md email files here")
+                        .font(.headline)
+                    Text("Opens an Apple Mail draft — never sends")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            .padding(24)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)

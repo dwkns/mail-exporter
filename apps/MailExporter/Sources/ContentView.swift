@@ -1,65 +1,32 @@
 import AppKit
 import SwiftUI
 
-enum AppTab: Hashable {
-    case export
-    case send
-    case mailboxes
-}
-
 struct ContentView: View {
     @EnvironmentObject private var store: JobsStore
     @ObservedObject private var inbox = ComposeInbox.shared
-    @State private var selectedTab: AppTab = .export
 
     var body: some View {
         VStack(spacing: 0) {
             PermissionsBanner()
-
-            TabView(selection: $selectedTab) {
-                RunView(onEditMailbox: { jobID in
-                    store.selectedID = jobID
-                    selectedTab = .mailboxes
-                })
-                .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
-                .tag(AppTab.export)
+            RunView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                SendView()
-                    .tabItem { Label("Send Messages", systemImage: "envelope") }
-                    .tag(AppTab.send)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                ConfigView(isActive: selectedTab == .mailboxes)
-                    .tabItem { Label("Mailboxes", systemImage: "tray.full") }
-                    .tag(AppTab.mailboxes)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             AppDelegate.focusMainWindow()
             store.refreshMailAccess()
-            openSendAndCompose()
+            drainPendingDrafts()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshMailAccess()
         }
-        .onChange(of: inbox.generation) { _ in openSendAndCompose() }
-        .onChange(of: inbox.wantsSendTab) { wants in
-            if wants { openSendAndCompose() }
-        }
+        .onChange(of: inbox.generation) { _ in drainPendingDrafts() }
         .onOpenURL { url in
             ComposeInbox.shared.enqueue([url])
         }
     }
 
-    private func openSendAndCompose() {
-        if inbox.hasPending || inbox.wantsSendTab {
-            selectedTab = .send
-            inbox.wantsSendTab = false
-        }
+    private func drainPendingDrafts() {
         // Drain without forcing MailExporter front — MakeMailDraft activates Mail,
         // and bringing this window forward afterward covers the new draft.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {

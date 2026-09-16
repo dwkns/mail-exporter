@@ -44,7 +44,7 @@ enum ComposeBridge {
             return ComposeResult(
                 ok: false,
                 summary: "No markdown files",
-                detail: "Drop .md files (with email front matter) onto Send Messages."
+                detail: "Drop .md files (with email front matter) onto the Export drop zone."
             )
         }
         return try composeViaAppleScript(mdFiles: mdFiles)

@@ -111,7 +111,7 @@ Best regards
 
 ### How to open the draft
 
-1. **MailExporter → Send Messages** — drop the `.md` file(s) on the drop target (or Choose Files…).
+1. **MailExporter** — drop the `.md` file(s) on the Export pane drop target (or Choose Files…).
 2. **MCP** — `compose_draft` with `path` to the `.md` (or inline `markdown`).
 3. **CLI** — `python -m engine append-draft path.md`
 
@@ -119,7 +119,7 @@ Neither path sends mail. Drafts open via **AppleScript** (native Mail reply quot
 
 ### Attachments
 
-Use `Attach:` (also `Attachment:` / `Attachments:`) with paths **relative to the `.md` file’s folder** (`../…` may reach sibling folders). Dropping a PDF/image onto Send Messages does **not** attach it — put it on an `Attach:` line. Reply + Attach uses Mail’s **Attach Files…** menu so the quoted original stays intact.
+Use `Attach:` (also `Attachment:` / `Attachments:`) with paths **relative to the `.md` file’s folder** (`../…` may reach sibling folders). Dropping a PDF/image onto the Export drop zone does **not** attach it — put it on an `Attach:` line. Reply + Attach uses Mail’s **Attach Files…** menu so the quoted original stays intact.
 
 ### Replies vs new drafts
 
@@ -166,7 +166,7 @@ Typical admin flow:
 1. `export_job` if mail looks stale.
 2. `list_messages` → `read_message` for context; keep the `messageId`.
 3. Write `{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md` with `In-Reply-To: <messageId>`.
-4. `compose_draft` (or drop onto Send Messages).
+4. `compose_draft` (or drop onto the Export pane).
 5. After the owner sends: `export_job` again, match the new `.eml`, move the `.md` to `{{OUTPUT_DIR}}/Sent`.
 
 ## Ground rules

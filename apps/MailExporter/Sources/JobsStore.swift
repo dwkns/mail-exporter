@@ -127,7 +127,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
 
     init(
         id: String = UUID().uuidString,
-        name: String = "New Mailbox",
+        name: String = "New Export",
         outputDir: String = NSHomeDirectory() + "/Desktop/Mail Export",
         conjunction: String = "all",
         groups: [MatchGroup] = [MatchGroup()],
@@ -268,7 +268,7 @@ final class JobsStore: ObservableObject {
     @Published var jobs: [ExportJob] = []
     @Published var selectedID: String?
     @Published var status: String = ""
-    /// Shown only in Mailboxes when Mail library access is blocked.
+    /// Shown when Mail library access is blocked.
     @Published var needsFullDiskAccess: Bool = false
     @Published var needsAccessibility: Bool = false
 
@@ -425,7 +425,7 @@ final class JobsStore: ObservableObject {
 
         guard fm.fileExists(atPath: targetURL.path) else {
             jobs = []
-            status = "No mailboxes yet"
+            status = "No exports yet"
             return
         }
         do {
@@ -436,14 +436,14 @@ final class JobsStore: ObservableObject {
                 selectedID = jobs.first?.id
             }
             let n = jobs.count
-            status = n == 1 ? "1 mailbox" : "\(n) mailboxes"
+            status = n == 1 ? "1 export" : "\(n) exports"
             if targetURL != url {
                 save()
             } else {
                 detectMovedTargetFolders()
             }
         } catch {
-            status = "Couldn’t open mailboxes: \(error.localizedDescription)"
+            status = "Couldn’t open exports: \(error.localizedDescription)"
         }
     }
 
@@ -815,6 +815,53 @@ final class JobsStore: ObservableObject {
         jobs.append(job)
         selectedID = job.id
         save()
+    }
+
+    /// Insert or replace a job and write `jobs.json`. Does not touch the export folder.
+    func upsertJob(_ job: ExportJob) {
+        if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
+            jobs[idx] = job
+            refreshBookmark(for: idx)
+        } else {
+            jobs.append(job)
+            if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
+                refreshBookmark(for: idx)
+            }
+        }
+        selectedID = job.id
+        save()
+    }
+
+    /// Encode `jobs` plus an optional draft overlay to a temp file (Check Matches
+    /// without committing the sheet).
+    func temporaryConfigURL(including draft: ExportJob) throws -> URL {
+        var tempJobs = jobs
+        if let idx = tempJobs.firstIndex(where: { $0.id == draft.id }) {
+            tempJobs[idx] = draft
+        } else {
+            tempJobs.append(draft)
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mailexporter-preview-\(UUID().uuidString).json")
+        let data = try JSONEncoder().encode(JobsDocument(jobs: tempJobs))
+        let obj = try JSONSerialization.jsonObject(with: data)
+        let pretty = try JSONSerialization.data(
+            withJSONObject: obj,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try pretty.write(to: url, options: .atomic)
+        return url
+    }
+
+    func applyFolderToJob(_ job: inout ExportJob, url: URL) {
+        job.outputDir = url.path
+        if let data = try? url.bookmarkData(
+            options: .minimalBookmark,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            job.bookmark = data.base64EncodedString()
+        }
     }
 
     func deleteJob(id: String) {

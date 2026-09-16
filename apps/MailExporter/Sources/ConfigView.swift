@@ -1,120 +1,123 @@
 import AppKit
 import SwiftUI
 
-struct ConfigView: View {
+enum JobEditorPresentation: Identifiable, Hashable {
+    case add
+    case edit(id: String)
+
+    var id: String {
+        switch self {
+        case .add: return "add"
+        case .edit(let jobID): return "edit-\(jobID)"
+        }
+    }
+
+    var isAdd: Bool {
+        if case .add = self { return true }
+        return false
+    }
+
+    var title: String {
+        switch self {
+        case .add: return "New Export"
+        case .edit: return "Edit Export"
+        }
+    }
+}
+
+struct JobEditorSheet: View {
     @EnvironmentObject private var store: JobsStore
-    /// True while the Mailboxes tab is selected — keeps keyboard focus on the list name.
-    var isActive: Bool = false
+    @Environment(\.dismiss) private var dismiss
+
+    let presentation: JobEditorPresentation
+    @State private var draft: ExportJob
     @State private var previewText: String = ""
     @State private var busy = false
     @State private var elapsedSeconds: TimeInterval = 0
     @State private var runStartedAt: Date?
     @State private var tick: Timer?
-    @FocusState private var mailboxListFocused: Bool
+    @State private var confirmDelete = false
+
+    init(presentation: JobEditorPresentation, initialJob: ExportJob?) {
+        self.presentation = presentation
+        if let initialJob {
+            _draft = State(initialValue: initialJob)
+        } else {
+            _draft = State(initialValue: ExportJob())
+        }
+    }
 
     var body: some View {
-        HSplitView {
-            mailboxList
-                .frame(minWidth: 160, idealWidth: 200, maxWidth: 280)
-                .frame(maxHeight: .infinity)
-            editor
-                .frame(minWidth: 480)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            store.refreshMailAccess()
-            focusMailboxListIfActive()
-        }
-        .onChange(of: isActive) { active in
-            if active { focusMailboxListIfActive() }
-        }
-        .onChange(of: store.selectedID) { _ in
-            if isActive { focusMailboxListIfActive() }
-        }
-        .onDisappear { stopTicker() }
-    }
-
-    private func focusMailboxListIfActive() {
-        guard isActive else { return }
-        // Defer so we win over the editor TextField becoming first responder on tab switch.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            mailboxListFocused = true
-        }
-    }
-
-    private var mailboxList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Mailboxes")
-                .font(.headline)
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-            List(selection: $store.selectedID) {
-                ForEach(store.jobs) { job in
-                    Text(job.name)
-                        .tag(job.id)
-                        .accessibilityLabel(job.name)
-                }
-            }
-            .listStyle(.sidebar)
-            .focused($mailboxListFocused)
-            .focusable()
-
-            Divider()
-
-            HStack(spacing: 8) {
-                Button(action: store.addJob) {
-                    Label("Add", systemImage: "plus")
-                }
-                Button(role: .destructive, action: store.deleteSelected) {
-                    Label("Delete", systemImage: "trash")
-                }
-                .disabled(store.selectedID == nil)
+        VStack(spacing: 0) {
+            HStack {
+                Text(presentation.title)
+                    .font(.title2.weight(.semibold))
                 Spacer()
-                Button(action: store.save) {
-                    Label("Save", systemImage: "square.and.arrow.down")
-                }
-                .keyboardShortcut("s", modifiers: .command)
             }
-            .padding(10)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
 
-    @ViewBuilder
-    private var editor: some View {
-        if let idx = store.jobs.firstIndex(where: { $0.id == store.selectedID }) {
             SmartMailboxEditor(
-                job: $store.jobs[idx],
-                folderStatus: store.folderStatus(for: store.jobs[idx]),
+                job: $draft,
+                folderStatus: store.folderStatus(for: draft),
                 onUseFoundLocation: { url in
-                    store.jobs[idx].outputDir = url.path
-                    store.refreshBookmark(for: idx)
-                    store.save()
+                    applyFolder(url)
                 },
                 previewText: $previewText,
                 busy: $busy,
                 elapsedLabel: busy ? Self.formatDuration(elapsedSeconds) : nil,
-                onPreview: { preview(jobID: store.jobs[idx].id) },
-                onBrowse: { browse(for: idx) }
+                onPreview: { preview() },
+                onBrowse: { browse() }
             )
-        } else {
-            VStack(spacing: 8) {
-                Image(systemName: "tray")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text("No Mailbox Selected")
-                    .font(.headline)
+
+            Divider()
+
+            HStack(spacing: 12) {
+                if !presentation.isAdd {
+                    Button("Delete", role: .destructive) {
+                        confirmDelete = true
+                    }
+                }
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    saveDraft()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .frame(minWidth: 720, idealWidth: 780, minHeight: 520, idealHeight: 580)
+        .onDisappear { stopTicker() }
+        .confirmationDialog(
+            "Delete Export?",
+            isPresented: $confirmDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                store.deleteJob(id: draft.id)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Remove “\(draft.name)” from MailExporter?\n\nExported emails in \(draft.outputDir) will not be deleted."
+            )
         }
     }
 
-    private func browse(for idx: Int) {
+    private func saveDraft() {
+        store.upsertJob(draft)
+        dismiss()
+    }
+
+    private func browse() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -122,22 +125,35 @@ struct ConfigView: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            store.jobs[idx].outputDir = url.path
-            store.refreshBookmark(for: idx)
-            store.save()
+            applyFolder(url)
         }
     }
 
-    private func preview(jobID: String) {
-        store.detectMovedTargetFolders(jobID: jobID)
-        store.save()
+    private func applyFolder(_ url: URL) {
+        var next = draft
+        store.applyFolderToJob(&next, url: url)
+        draft = next
+    }
+
+    private func preview() {
         busy = true
         previewText = ""
         startTicker()
         let root = store.projectRoot
-        let config = store.configURL
+        let jobID = draft.id
         let started = Date()
+        let config: URL
+        do {
+            config = try store.temporaryConfigURL(including: draft)
+        } catch {
+            stopTicker()
+            busy = false
+            previewText = "Couldn’t check matches"
+            store.status = error.localizedDescription
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async {
+            defer { try? FileManager.default.removeItem(at: config) }
             do {
                 let result = try EngineBridge.run(
                     projectRoot: root,
@@ -219,7 +235,7 @@ struct SmartMailboxEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Smart Mailbox Name:")
+                Text("Name:")
                     .frame(width: 150, alignment: .trailing)
                 TextField("Name", text: $job.name)
                     .textFieldStyle(.roundedBorder)
@@ -309,7 +325,6 @@ struct SmartMailboxEditor: View {
                 .buttonStyle(.borderless)
             }
 
-            // Remaining space scrolls if needed; each group sizes to its rows.
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(job.groups.indices), id: \.self) { idx in
@@ -354,9 +369,9 @@ struct SmartMailboxEditor: View {
                 .disabled(busy)
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
@@ -387,7 +402,6 @@ private struct RuleGroupCard: View {
                 }
             }
 
-            // Height follows the number of condition rows (grows as you add).
             VStack(spacing: 0) {
                 ForEach($group.conditions) { $clause in
                     ConditionRow(
