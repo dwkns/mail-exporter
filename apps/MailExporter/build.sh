@@ -184,8 +184,26 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Entitlements: iCloud ubiquity container + allow bundled PyInstaller helper
-cat > "${ROOT}/build/MailExporter.entitlements" <<'ENT'
+# Entitlements: always allow bundled PyInstaller helper.
+# iCloud container keys only with a real Apple identity — ad-hoc + those
+# entitlements makes launchd reject the app ("can't be opened", error 163).
+ENT_FILE="${ROOT}/build/MailExporter.entitlements"
+if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+  cat > "${ENT_FILE}" <<'ENT'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
+ENT
+  echo "Ad-hoc signing: omitting iCloud entitlements (jobs.json uses local Application Support)."
+else
+  cat > "${ENT_FILE}" <<'ENT'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -209,9 +227,11 @@ cat > "${ROOT}/build/MailExporter.entitlements" <<'ENT'
 </dict>
 </plist>
 ENT
+  echo "Developer signing: including iCloud ubiquity container entitlements."
+fi
 
 # Keep a checked-in copy for reference / Xcode import later
-cp "${ROOT}/build/MailExporter.entitlements" "${ROOT}/MailExporter.entitlements"
+cp "${ENT_FILE}" "${ROOT}/MailExporter.entitlements"
 
 echo "Compiling Swift UI…"
 swiftc \
