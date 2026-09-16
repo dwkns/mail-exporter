@@ -7,22 +7,33 @@ alwaysApply: true
 
 After finishing a **shippable** feature or bug fix (not docs-only / rule-only / WIP), complete this checklist. Do not ask the user to ship.
 
+## Why version order matters
+
+`build.sh` sets `CFBundleShortVersionString` from the latest git tag plus commits since that tag (`APP_VERSION` overrides). Building **before** the ship commit, while `HEAD` is still the previous tag, stamps the **old** version (commits-since = 0). A silent failed copy into `/Applications` leaves the previous binary in place. Either way the user launches last-release (e.g. 1.1.7) and the in-app updater immediately offers the tag you just published (e.g. 1.1.8).
+
+Local `/Applications/MailExporter.app` must show the version being tagged.
+
 ## Checklist
 
-1. **Commit** the change (user rules: commit after each discrete change).
-2. **Build locally** so `/Applications/MailExporter.app` is current:
+1. **Commit** the change first (user rules: commit after each discrete change). Do not build-for-ship from an uncommitted tree on the previous tag.
+2. **Compute the next version** (see below). If `COMMITS` is 0, `HEAD` is already tagged — skip release unless the user asks.
+3. **Build locally with that version** so `/Applications/MailExporter.app` matches the tag you are about to create:
    ```bash
-   ./apps/MailExporter/build.sh
+   APP_VERSION="${NEXT}" ./apps/MailExporter/build.sh
+   defaults read /Applications/MailExporter.app/Contents/Info CFBundleShortVersionString
    ```
-3. **Push** the branch to `origin` (`main` unless already on another branch):
+   The short version must equal `"${NEXT#v}"`. `build.sh` now fails if the copy did not land or the installed plist does not match. Do **not** run a bare `./apps/MailExporter/build.sh` for a ship — without `APP_VERSION`, a pre-tag build is easy to get wrong if the commit was skipped.
+4. **Push** the branch to `origin` (`main` unless already on another branch):
    ```bash
    git push -u origin HEAD
    ```
-4. **Release** via a new `v*` tag (do **not** change CI to release on every `main` push). Tagging is the release gate; `build-release.yml` publishes the zip on `v*` tags.
+5. **Release** via the annotated `v*` tag (do **not** change CI to release on every `main` push). Tagging is the release gate; `build-release.yml` publishes the zip on `v*` tags (CI also passes `APP_VERSION` from the tag name):
+   ```bash
+   git tag -a "${NEXT}" -m "MailExporter ${NEXT}"
+   git push origin "${NEXT}"
+   ```
 
 ## Version bump (default: patch)
-
-Match `apps/MailExporter/build.sh` so the GitHub Release version matches what local untagged builds already show:
 
 ```bash
 git fetch --tags origin
@@ -33,16 +44,15 @@ COMMITS="$(git rev-list --count "${LATEST_TAG}..HEAD")"
 IFS='.' read -r MAJOR MINOR PATCH_BASE <<< "${BASE}"
 PATCH=$(( PATCH_BASE + COMMITS ))
 NEXT="v${MAJOR}.${MINOR}.${PATCH}"
-git tag -a "${NEXT}" -m "MailExporter ${NEXT}"
-git push origin "${NEXT}"
 ```
 
 - **Default:** that patch-style bump (above).
 - **Minor/major:** only when the user asks.
 - Prefer pushing the annotated tag over `workflow_dispatch` / `gh release create` unless tagging is blocked; CI creates the Release and attaches `MailExporter-macOS-arm64.zip`.
+- After a ship, leave `/Applications` on **that** tagged version. Do not rebuild without `APP_VERSION` afterward in a way that stamps the next unreleased patch unless you are actually shipping that patch.
 
 ## Notes
 
 - A plain `main` push builds CI artifacts but does **not** create a GitHub Release; in-app updates need a real Release with the zip.
-- Tell the user the new tag and that CI will publish the release.
+- Tell the user the new tag, that CI will publish the release, and the `CFBundleShortVersionString` now in `/Applications`.
 - Local signing still depends on the machine’s Apple signing setup; CI signing follows the workflow secrets.

@@ -69,7 +69,10 @@ if [[ ! -x "${VENV}/bin/pyinstaller" ]]; then
   "${VENV}/bin/pip" install -q pyinstaller -r "${REPO}/requirements-dev.txt"
 fi
 
-# Determine version and build number
+# Determine version and build number.
+# Latest tag + commits since that tag. Uncommitted work on a tagged HEAD does
+# not increment (commits-since is 0), so a ship must pass APP_VERSION matching
+# the tag being created — see .cursor/rules/ship-mailexporter.mdc.
 if [[ -n "${APP_VERSION:-}" ]]; then
   VERSION="${APP_VERSION#v}"
 else
@@ -350,11 +353,25 @@ echo "Built (self-contained): ${APP}"
 DEST_APP="/Applications/MailExporter.app"
 if [[ -d "/Applications" ]]; then
   echo "Copying to ${DEST_APP}…"
-  rm -rf "${DEST_APP}" 2>/dev/null || true
-  if ditto "${APP}" "${DEST_APP}" 2>/dev/null; then
-    echo "Copied to ${DEST_APP}"
-  else
-    echo "Note: Could not copy to ${DEST_APP} (permission denied)."
+  if pgrep -x MailExporter >/dev/null 2>&1; then
+    echo "Quitting running MailExporter so the install can be replaced…"
+    osascript -e 'tell application "MailExporter" to quit' 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      pgrep -x MailExporter >/dev/null 2>&1 || break
+      sleep 1
+    done
+    if pgrep -x MailExporter >/dev/null 2>&1; then
+      echo "error: MailExporter is still running; quit it and rerun so /Applications can be updated." >&2
+      exit 1
+    fi
+  fi
+  rm -rf "${DEST_APP}"
+  ditto "${APP}" "${DEST_APP}"
+  INSTALLED="$(defaults read "${DEST_APP}/Contents/Info" CFBundleShortVersionString)"
+  echo "Copied to ${DEST_APP} (CFBundleShortVersionString ${INSTALLED})"
+  if [[ "${INSTALLED}" != "${VERSION}" ]]; then
+    echo "error: ${DEST_APP} is ${INSTALLED}, expected ${VERSION}" >&2
+    exit 1
   fi
 fi
 
