@@ -155,7 +155,6 @@ struct RunView: View {
                         result: sessionResults[job.id],
                         busy: busy,
                         debugMode: prefs.debugMode,
-                        isSelected: store.selectedID == job.id,
                         isRunningThis: busy && (runningJobID == nil || runningJobID == job.id),
                         progressLabel: (busy && (runningJobID == nil || runningJobID == job.id))
                             ? rowProgressLabel(for: job.id) : nil,
@@ -171,7 +170,6 @@ struct RunView: View {
                         },
                         onClearTarget: { clearConfirmJob = job },
                         onEdit: {
-                            store.selectedID = job.id
                             editor = .edit(id: job.id)
                         }
                     )
@@ -487,7 +485,6 @@ private struct ExportJobRow: View {
     let result: SessionExportResult?
     let busy: Bool
     let debugMode: Bool
-    let isSelected: Bool
     let isRunningThis: Bool
     let progressLabel: String?
     @Binding var isDetailsOpen: Bool
@@ -635,8 +632,8 @@ private struct ExportJobRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .contentShape(Rectangle())
-            .onTapGesture(perform: onEdit)
-            .help("Edit this export")
+            .onTapGesture(count: 2, perform: onEdit)
+            .help("Double-click to edit this export")
 
             if result != nil, !isRunningThis {
                 detailsButton
@@ -673,15 +670,6 @@ private struct ExportJobRow: View {
         .padding(.trailing, 14)
         .padding(.vertical, 11)
         .background(rowFill)
-        .overlay(alignment: .leading) {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(Color.accentColor)
-                    .frame(width: 3)
-                    .padding(.vertical, 10)
-                    .padding(.leading, 4)
-            }
-        }
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Export") {
@@ -700,17 +688,11 @@ private struct ExportJobRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(job.name)
         .accessibilityValue(statusText ?? displayPath)
-        .accessibilityHint("Opens the editor for this export")
+        .accessibilityHint("Double-click to edit this export")
     }
 
     private var rowFill: Color {
-        if isSelected {
-            return Color.accentColor.opacity(0.12)
-        }
-        if hovering {
-            return Color.primary.opacity(0.045)
-        }
-        return .clear
+        hovering ? Color.primary.opacity(0.045) : .clear
     }
 
     private var detailsButton: some View {
