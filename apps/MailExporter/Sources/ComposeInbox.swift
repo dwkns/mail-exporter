@@ -122,7 +122,7 @@ final class ComposeRunner: ObservableObject {
                 if self.statusLines.count > 12 {
                     self.statusLines = Array(self.statusLines.prefix(12))
                 }
-                AppDelegate.bringToForegroundRepeatedly()
+                // Leave Mail (and the new draft) in front — do not steal focus back.
                 self.drainInbox()
             }
         }

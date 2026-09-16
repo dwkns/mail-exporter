@@ -60,9 +60,9 @@ struct ContentView: View {
             selectedTab = .send
             inbox.wantsSendTab = false
         }
-        // Let the window come forward before osascript activates Mail.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            AppDelegate.focusMainWindow()
+        // Drain without forcing MailExporter front — MakeMailDraft activates Mail,
+        // and bringing this window forward afterward covers the new draft.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             ComposeRunner.shared.drainInbox()
         }
     }

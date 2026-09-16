@@ -76,13 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Dock / Finder drop onto the app icon (and `open -a MailExporter file.md`).
     func application(_ application: NSApplication, open urls: [URL]) {
         ComposeInbox.shared.enqueue(urls)
-        Self.bringToForegroundRepeatedly()
+        // Don't yank focus repeatedly — compose will activate Mail with the draft.
         DispatchQueue.main.async {
             Self.closeSurplusWindows()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             Self.closeSurplusWindows()
-            Self.focusMainWindow()
         }
     }
 
