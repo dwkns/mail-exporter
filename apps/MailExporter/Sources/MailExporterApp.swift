@@ -86,7 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        Self.focusMainWindow()
+        // Space swipes fire this. Do not order-front or move the window onto
+        // the active space — that hides MailExporter when leaving Cursor.
+        Self.keepWindowOnAssignedSpace()
     }
 
     func applicationShouldHandleReopen(
@@ -124,19 +126,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Launch / Dock reopen only. Never call from compose or `didBecomeActive`
+    /// (Mission Control space swipes). Does not steal the window onto another Space.
     static func focusMainWindow() {
         NSApp.setActivationPolicy(.regular)
         NSApp.unhide(nil)
-        var psn = ProcessSerialNumber(highLongOfPSN: 0, lowLongOfPSN: UInt32(kCurrentProcess))
-        _ = TransformProcessType(&psn, ProcessApplicationTransformState(kProcessTransformToForegroundApplication))
         NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         guard let win = mainWindows().first ?? NSApp.windows.first else { return }
         if win.isMiniaturized { win.deminiaturize(nil) }
-        win.collectionBehavior.insert(.moveToActiveSpace)
-        win.orderFrontRegardless()
+        Self.keepWindowOnAssignedSpace(win)
         win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Stay on the Space the user placed the window. `.moveToActiveSpace` made
+    /// MailExporter vanish when swiping Cursor → Desktop with Mail also open.
+    static func keepWindowOnAssignedSpace(_ window: NSWindow? = nil) {
+        let targets = window.map { [$0] } ?? mainWindows()
+        for win in targets {
+            win.collectionBehavior.remove(.moveToActiveSpace)
+            win.collectionBehavior.remove(.canJoinAllSpaces)
+        }
     }
 
     static func closeSurplusWindows() {
