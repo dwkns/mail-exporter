@@ -38,85 +38,15 @@ struct RunView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center) {
-                Text("Export")
-                    .font(.title2.weight(.semibold))
-                Spacer()
-                if busy {
-                    Text(progressLabel)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                Button {
-                    editor = .add
-                } label: {
-                    Label("Add Export", systemImage: "plus")
-                }
-                .disabled(busy)
-                Button {
-                    run(jobID: nil)
-                } label: {
-                    Text(busy ? "Exporting…" : "Export All")
-                }
-                .disabled(busy || store.jobs.isEmpty || hasAnyMissingFolder)
-                .keyboardShortcut(.defaultAction)
-                .help(hasAnyMissingFolder ? "One or more exports have a missing folder" : "Export all jobs")
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
-
+            header
             if store.jobs.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("No exports yet.")
-                        .foregroundStyle(.secondary)
-                    Button("Add Export") {
-                        editor = .add
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.horizontal, 16)
+                emptyState
             } else {
-                List {
-                    ForEach(store.jobs) { job in
-                        let status = store.folderStatus(for: job)
-                        ExportJobRow(
-                            job: job,
-                            folderStatus: status,
-                            result: sessionResults[job.id],
-                            busy: busy,
-                            debugMode: prefs.debugMode,
-                            isSelected: store.selectedID == job.id,
-                            isRunningThis: busy && (runningJobID == nil || runningJobID == job.id),
-                            progressLabel: (busy && (runningJobID == nil || runningJobID == job.id))
-                                ? rowProgressLabel(for: job.id) : nil,
-                            isDetailsOpen: Binding(
-                                get: { openDetailsID == job.id },
-                                set: { openDetailsID = $0 ? job.id : nil }
-                            ),
-                            onExport: { run(jobID: job.id) },
-                            onShowInFinder: { showInFinder(job.outputDir) },
-                            onChooseFolder: { store.promptChooseFolder(for: job.id) },
-                            onUseFoundLocation: { url in
-                                store.updateOutputDir(for: job.id, newPath: url.path)
-                            },
-                            onClearTarget: { clearConfirmJob = job },
-                            onEdit: {
-                                store.selectedID = job.id
-                                editor = .edit(id: job.id)
-                            }
-                        )
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                    }
-                }
-                .listStyle(.plain)
+                jobList
             }
-
             DraftDropZone()
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDisappear { stopTicker() }
         .sheet(item: $editor) { item in
@@ -154,6 +84,112 @@ struct RunView: View {
 
     private var hasAnyMissingFolder: Bool {
         store.jobs.contains { !store.folderStatus(for: $0).isValidForExport }
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text("Export")
+                .font(.title2.weight(.semibold))
+            if busy {
+                Text(progressLabel)
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .help("Elapsed time for the current export")
+            }
+            Spacer(minLength: 12)
+            Button {
+                editor = .add
+            } label: {
+                Label("Add Export", systemImage: "plus")
+            }
+            .disabled(busy)
+            Button {
+                run(jobID: nil)
+            } label: {
+                Text(busy ? "Exporting…" : "Export All")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(busy || store.jobs.isEmpty || hasAnyMissingFolder)
+            .keyboardShortcut(.defaultAction)
+            .help(hasAnyMissingFolder ? "One or more exports have a missing folder" : "Export all jobs")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            JobGlyph(symbol: "tray.and.arrow.down.fill", tint: .accentColor, size: 52)
+            VStack(spacing: 4) {
+                Text("No exports yet")
+                    .font(.title3.weight(.semibold))
+                Text("Each export copies matching Mail messages into a folder on disk.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+            }
+            Button {
+                editor = .add
+            } label: {
+                Label("Add Export", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 20)
+    }
+
+    private var jobList: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(store.jobs.enumerated()), id: \.element.id) { index, job in
+                    let status = store.folderStatus(for: job)
+                    ExportJobRow(
+                        job: job,
+                        folderStatus: status,
+                        result: sessionResults[job.id],
+                        busy: busy,
+                        debugMode: prefs.debugMode,
+                        isSelected: store.selectedID == job.id,
+                        isRunningThis: busy && (runningJobID == nil || runningJobID == job.id),
+                        progressLabel: (busy && (runningJobID == nil || runningJobID == job.id))
+                            ? rowProgressLabel(for: job.id) : nil,
+                        isDetailsOpen: Binding(
+                            get: { openDetailsID == job.id },
+                            set: { openDetailsID = $0 ? job.id : nil }
+                        ),
+                        onExport: { run(jobID: job.id) },
+                        onShowInFinder: { showInFinder(job.outputDir) },
+                        onChooseFolder: { store.promptChooseFolder(for: job.id) },
+                        onUseFoundLocation: { url in
+                            store.updateOutputDir(for: job.id, newPath: url.path)
+                        },
+                        onClearTarget: { clearConfirmJob = job },
+                        onEdit: {
+                            store.selectedID = job.id
+                            editor = .edit(id: job.id)
+                        }
+                    )
+                    if index < store.jobs.count - 1 {
+                        Divider()
+                            .padding(.leading, 62)
+                            .padding(.trailing, 14)
+                    }
+                }
+            }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func showInFinder(_ rawPath: String) {
@@ -425,6 +461,24 @@ struct RunView: View {
     }
 }
 
+private struct JobGlyph: View {
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 36
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.42, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(
+                RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                    .fill(tint.gradient)
+            )
+            .accessibilityHidden(true)
+    }
+}
+
 private struct ExportJobRow: View {
     let job: ExportJob
     let folderStatus: FolderStatus
@@ -442,7 +496,43 @@ private struct ExportJobRow: View {
     var onClearTarget: () -> Void
     var onEdit: () -> Void
 
-    private var line1Status: String? {
+    @State private var hovering = false
+
+    private static let identityTints: [Color] = [
+        .blue, .teal, .indigo, .purple, .orange, .mint,
+    ]
+
+    private var identityTint: Color {
+        let hash = job.id.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
+        let index = abs(hash) % Self.identityTints.count
+        return Self.identityTints[index]
+    }
+
+    private var glyphTint: Color {
+        switch folderStatus {
+        case .exists:
+            return identityTint
+        case .moved:
+            return .orange
+        case .inTrash, .notFound:
+            return .red
+        }
+    }
+
+    private var glyphSymbol: String {
+        switch folderStatus {
+        case .exists:
+            return "tray.and.arrow.down.fill"
+        case .moved:
+            return "questionmark.folder.fill"
+        case .inTrash:
+            return "trash.fill"
+        case .notFound:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var statusText: String? {
         if isRunningThis {
             if let progressLabel { return progressLabel }
             return "Exporting…"
@@ -454,9 +544,9 @@ private struct ExportJobRow: View {
         case .moved:
             return "Folder moved"
         case .inTrash:
-            return "Folder is in Trash"
+            return "In Trash"
         case .notFound:
-            return "Folder not found"
+            return "Folder missing"
         }
     }
 
@@ -483,6 +573,15 @@ private struct ExportJobRow: View {
         }
     }
 
+    private var displayPath: String {
+        let home = NSHomeDirectory()
+        let expanded = (job.outputDir as NSString).expandingTildeInPath
+        if expanded.hasPrefix(home) {
+            return "~" + expanded.dropFirst(home.count)
+        }
+        return job.outputDir
+    }
+
     private var detailsText: String {
         if let result { return result.detail }
         return job.outputDir
@@ -490,88 +589,65 @@ private struct ExportJobRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    if case .moved = folderStatus {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .font(.caption)
-                    } else if case .inTrash = folderStatus {
-                        Image(systemName: "trash.fill")
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    } else if case .notFound = folderStatus {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    }
+            HStack(alignment: .center, spacing: 12) {
+                JobGlyph(symbol: glyphSymbol, tint: glyphTint)
 
-                    Text(job.name)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-
-                    if isRunningThis {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-
-                    if let line1Status {
-                        Text(line1Status)
-                            .font(.caption)
-                            .foregroundStyle(statusColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(job.name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
-                            .truncationMode(.tail)
-                            .layoutPriority(-1)
-                    }
 
-                    if result != nil, !isRunningThis {
-                        Button {
-                            isDetailsOpen.toggle()
-                        } label: {
-                            Image(systemName: "info.circle")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        if isRunningThis {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.72)
+                                .frame(width: 12, height: 12)
+                                .help("This export is running")
                         }
-                        .buttonStyle(.plain)
-                        .help("Details")
-                        .popover(isPresented: $isDetailsOpen, arrowEdge: .bottom) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ScrollView {
-                                    Text(detailsText)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .frame(minWidth: 360, idealWidth: 420, maxWidth: 520, minHeight: 80, maxHeight: 280)
-                                if let pane = MailAccessProbe.settingsPane(for: detailsText) {
-                                    Button(pane.buttonTitle) {
-                                        pane.open()
-                                    }
-                                    .buttonStyle(.link)
-                                    .font(.caption)
-                                }
-                            }
-                            .padding(12)
+
+                        Spacer(minLength: 8)
+
+                        if let statusText {
+                            Text(statusText)
+                                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                                .foregroundStyle(statusColor)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(-1)
                         }
                     }
-                }
 
-                Text(job.outputDir)
-                    .font(.caption)
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 11, weight: .medium))
+                        Text(displayPath)
+                            .truncationMode(.middle)
+                    }
+                    .font(.system(size: 12))
                     .foregroundStyle(pathColor)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .help(job.outputDir)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture(perform: onEdit)
             .help("Edit this export")
+
+            if result != nil, !isRunningThis {
+                detailsButton
+            }
 
             inlineRecoveryButtons
 
             HStack(spacing: 8) {
                 if folderStatus.isValidForExport {
-                    Button("Show in Finder", action: onShowInFinder)
+                    Button(action: onShowInFinder) {
+                        Label("Show in Finder", systemImage: "folder")
+                    }
+                    .help("Reveal the export folder in Finder")
                 } else {
                     Button("Choose Folder…", action: onChooseFolder)
                 }
@@ -588,14 +664,20 @@ private struct ExportJobRow: View {
             }
             .controlSize(.regular)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected
-                    ? Color.accentColor.opacity(0.12)
-                    : Color(nsColor: .controlBackgroundColor))
-        )
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
+        .padding(.vertical, 11)
+        .background(rowFill)
+        .overlay(alignment: .leading) {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+                    .padding(.leading, 4)
+            }
+        }
+        .onHover { hovering = $0 }
         .contextMenu {
             Button("Export") {
                 onExport()
@@ -609,6 +691,51 @@ private struct ExportJobRow: View {
             }
 
             Button("Edit", action: onEdit)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(job.name)
+        .accessibilityValue(statusText ?? displayPath)
+        .accessibilityHint("Opens the editor for this export")
+    }
+
+    private var rowFill: Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.12)
+        }
+        if hovering {
+            return Color.primary.opacity(0.045)
+        }
+        return .clear
+    }
+
+    private var detailsButton: some View {
+        Button {
+            isDetailsOpen.toggle()
+        } label: {
+            Image(systemName: "info.circle")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Details")
+        .popover(isPresented: $isDetailsOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                ScrollView {
+                    Text(detailsText)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minWidth: 360, idealWidth: 420, maxWidth: 520, minHeight: 80, maxHeight: 280)
+                if let pane = MailAccessProbe.settingsPane(for: detailsText) {
+                    Button(pane.buttonTitle) {
+                        pane.open()
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+            }
+            .padding(12)
         }
     }
 
