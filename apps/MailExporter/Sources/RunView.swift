@@ -103,11 +103,11 @@ struct RunView: View {
                             onClearTarget: { clearConfirmJob = job },
                             onEdit: { editor = .edit(id: job.id) }
                         )
-                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                        .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
                     }
                 }
                 .listStyle(.inset)
-                .environment(\.defaultMinListRowHeight, 36)
+                .environment(\.defaultMinListRowHeight, 56)
             }
 
             DraftDropZone()
@@ -476,8 +476,8 @@ private struct ExportJobRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
+        HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 if case .moved = folderStatus {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -490,7 +490,7 @@ private struct ExportJobRow: View {
                 }
 
                 Text(job.name)
-                    .font(.body.weight(.medium))
+                    .font(.headline)
                     .lineLimit(1)
 
                 Text(statusCaption)
@@ -539,36 +539,39 @@ private struct ExportJobRow: View {
 
             inlineRecoveryButtons
 
-            if folderStatus.isValidForExport {
-                Button("Show in Finder", action: onShowInFinder)
-            } else {
-                Button("Choose Folder…", action: onChooseFolder)
-                    .buttonStyle(.bordered)
-            }
+            HStack(spacing: 10) {
+                if folderStatus.isValidForExport {
+                    Button("Show in Finder", action: onShowInFinder)
+                } else {
+                    Button("Choose Folder…", action: onChooseFolder)
+                        .buttonStyle(.bordered)
+                }
 
-            Button("Edit", action: onEdit)
-                .disabled(busy)
-
-            if debugMode && folderStatus.isValidForExport {
-                Button("Clear Target", role: .destructive, action: onClearTarget)
+                Button("Edit", action: onEdit)
                     .disabled(busy)
-            }
 
-            Button("Export", action: onExport)
-                .buttonStyle(.borderedProminent)
-                .disabled(busy || !folderStatus.isValidForExport)
-                .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
+                if debugMode && folderStatus.isValidForExport {
+                    Button("Clear Target", role: .destructive, action: onClearTarget)
+                        .disabled(busy)
+                }
+
+                Button("Export", action: onExport)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || !folderStatus.isValidForExport)
+                    .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
+            }
+            .controlSize(.regular)
         }
-        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 36, alignment: .center)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
         .overlay(alignment: .bottom) {
             if isRunningThis {
                 ProgressView()
                     .progressViewStyle(.linear)
-                    .frame(height: 2)
-                    .padding(.horizontal, 2)
+                    .frame(height: 3)
+                    .padding(.horizontal, 4)
             }
         }
-        .clipped()
         .contextMenu {
             Button("Export") {
                 onExport()
