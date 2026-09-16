@@ -1,0 +1,48 @@
+---
+description: After shipping a MailExporter feature or bugfix — build, push, and tag a GitHub Release
+alwaysApply: true
+---
+
+# Ship MailExporter (feature / bug fix)
+
+After finishing a **shippable** feature or bug fix (not docs-only / rule-only / WIP), complete this checklist. Do not ask the user to ship.
+
+## Checklist
+
+1. **Commit** the change (user rules: commit after each discrete change).
+2. **Build locally** so `/Applications/MailExporter.app` is current:
+   ```bash
+   ./apps/MailExporter/build.sh
+   ```
+3. **Push** the branch to `origin` (`main` unless already on another branch):
+   ```bash
+   git push -u origin HEAD
+   ```
+4. **Release** via a new `v*` tag (do **not** change CI to release on every `main` push). Tagging is the release gate; `build-release.yml` publishes the zip on `v*` tags.
+
+## Version bump (default: patch)
+
+Match `apps/MailExporter/build.sh` so the GitHub Release version matches what local untagged builds already show:
+
+```bash
+git fetch --tags origin
+LATEST_TAG="$(git describe --tags --abbrev=0)"
+BASE="${LATEST_TAG#v}"
+COMMITS="$(git rev-list --count "${LATEST_TAG}..HEAD")"
+# If COMMITS is 0, HEAD is already tagged — skip release unless the user asks.
+IFS='.' read -r MAJOR MINOR PATCH_BASE <<< "${BASE}"
+PATCH=$(( PATCH_BASE + COMMITS ))
+NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+git tag -a "${NEXT}" -m "MailExporter ${NEXT}"
+git push origin "${NEXT}"
+```
+
+- **Default:** that patch-style bump (above).
+- **Minor/major:** only when the user asks.
+- Prefer pushing the annotated tag over `workflow_dispatch` / `gh release create` unless tagging is blocked; CI creates the Release and attaches `MailExporter-macOS-arm64.zip`.
+
+## Notes
+
+- A plain `main` push builds CI artifacts but does **not** create a GitHub Release; in-app updates need a real Release with the zip.
+- Tell the user the new tag and that CI will publish the release.
+- Local signing still depends on the machine’s Apple signing setup; CI signing follows the workflow secrets.

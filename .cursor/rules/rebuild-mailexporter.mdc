@@ -14,3 +14,5 @@ Whenever you change anything that ships in the Mac app — Swift under `apps/Mai
 The build script will automatically compile, sign, and copy the app to `/Applications/MailExporter.app`.
 
 Do this automatically; do not ask the user to rebuild. Prefer rebuilding after the related commit for that change (or immediately if the change is not committed yet). Tell the user briefly that the app was rebuilt and copied to `/Applications`.
+
+For a **shippable** feature or bug fix, also follow `.cursor/rules/ship-mailexporter.mdc` (push + `v*` tag for GitHub Release). Local rebuild alone is not a full ship.
