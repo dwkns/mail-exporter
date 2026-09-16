@@ -185,24 +185,13 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 PLIST
 
 # Entitlements: always allow bundled PyInstaller helper.
-# iCloud container keys only with a real Apple identity — ad-hoc + those
-# entitlements makes launchd reject the app ("can't be opened", error 163).
+# Restricted capabilities (iCloud) require an App ID + provisioning profile.
+# Without a profile, launchd rejects the app ("can't be opened", error 163) even
+# when signed with Apple Development. Opt in via INCLUDE_ICLOUD_ENTITLEMENTS=1
+# once the App ID has iCloud and a matching .mobileprovision / Mac profile.
 ENT_FILE="${ROOT}/build/MailExporter.entitlements"
-if [[ "${SIGN_IDENTITY}" == "-" ]]; then
-  cat > "${ENT_FILE}" <<'ENT'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-  <true/>
-  <key>com.apple.security.cs.disable-library-validation</key>
-  <true/>
-</dict>
-</plist>
-ENT
-  echo "Ad-hoc signing: omitting iCloud entitlements (jobs.json uses local Application Support)."
-else
+INCLUDE_ICLOUD="${INCLUDE_ICLOUD_ENTITLEMENTS:-0}"
+if [[ "${INCLUDE_ICLOUD}" == "1" && "${SIGN_IDENTITY}" != "-" ]]; then
   cat > "${ENT_FILE}" <<'ENT'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -227,7 +216,25 @@ else
 </dict>
 </plist>
 ENT
-  echo "Developer signing: including iCloud ubiquity container entitlements."
+  echo "Developer signing with iCloud entitlements (INCLUDE_ICLOUD_ENTITLEMENTS=1)."
+else
+  cat > "${ENT_FILE}" <<'ENT'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
+ENT
+  if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+    echo "Ad-hoc signing: omitting iCloud entitlements (jobs.json uses local Application Support)."
+  else
+    echo "Developer signing without iCloud entitlements (set INCLUDE_ICLOUD_ENTITLEMENTS=1 when App ID + profile are ready)."
+  fi
 fi
 
 # Keep a checked-in copy for reference / Xcode import later
