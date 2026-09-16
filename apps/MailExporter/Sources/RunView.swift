@@ -87,7 +87,7 @@ struct RunView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Text("Export")
                 .font(.title2.weight(.semibold))
             if busy {
@@ -97,26 +97,34 @@ struct RunView: View {
                     .help("Elapsed time for the current export")
             }
             Spacer(minLength: 12)
-            Button {
+            HeaderActionButton(
+                title: "New",
+                symbol: "plus",
+                tint: .blue,
+                style: .quiet,
+                enabled: !busy
+            ) {
                 editor = .add
-            } label: {
-                Label("Add Export", systemImage: "plus")
             }
-            .accessibilityLabel("Add Export")
-            .disabled(busy)
-            Button {
+            .help("Add a new export")
+            .accessibilityLabel("New export")
+
+            HeaderActionButton(
+                title: busy ? "Exporting…" : "Export",
+                symbol: "tray.and.arrow.down.fill",
+                tint: .accentColor,
+                style: .prominent,
+                enabled: !busy && !store.jobs.isEmpty && !hasAnyMissingFolder,
+                spinning: busy
+            ) {
                 run(jobID: nil)
-            } label: {
-                Text(busy ? "Exporting…" : "Export All")
             }
-            .buttonStyle(.borderedProminent)
-            .accessibilityLabel(busy ? "Exporting" : "Export All")
-            .disabled(busy || store.jobs.isEmpty || hasAnyMissingFolder)
             .keyboardShortcut(.defaultAction)
             .help(hasAnyMissingFolder ? "One or more exports have a missing folder" : "Export all jobs")
+            .accessibilityLabel(busy ? "Exporting" : "Export all")
         }
         .padding(.horizontal, 20)
-        .padding(.top, 18)
+        .padding(.top, 16)
         .padding(.bottom, 12)
     }
 
@@ -132,13 +140,16 @@ struct RunView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
             }
-            Button {
+            HeaderActionButton(
+                title: "New",
+                symbol: "plus",
+                tint: .blue,
+                style: .quiet
+            ) {
                 editor = .add
-            } label: {
-                Label("Add Export", systemImage: "plus")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .help("Add a new export")
+            .accessibilityLabel("New export")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 20)
@@ -476,6 +487,90 @@ private struct JobGlyph: View {
                     .fill(tint.gradient)
             )
             .accessibilityHidden(true)
+    }
+}
+
+private struct HeaderActionButton: View {
+    enum Style {
+        case quiet
+        case prominent
+    }
+
+    let title: String
+    let symbol: String
+    let tint: Color
+    var style: Style = .quiet
+    var enabled: Bool = true
+    var spinning: Bool = false
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                ZStack {
+                    if spinning {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.72)
+                            .frame(width: 28, height: 28)
+                            .tint(style == .prominent ? Color.white : Color.secondary)
+                    } else if style == .prominent {
+                        Image(systemName: symbol)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.white.opacity(0.22))
+                            )
+                    } else {
+                        JobGlyph(symbol: symbol, tint: tint, size: 28)
+                    }
+                }
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(style == .prominent ? Color.white : Color.primary)
+            }
+            .padding(.leading, 5)
+            .padding(.trailing, 14)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(chipFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        style == .quiet
+                            ? Color(nsColor: .separatorColor).opacity(0.55)
+                            : Color.white.opacity(0.18),
+                        lineWidth: 1
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(hovering && enabled ? 0.10 : 0))
+            )
+        }
+        .buttonStyle(.plain)
+        .opacity(enabled ? 1 : 0.42)
+        .disabled(!enabled)
+        .onHover { hovering = $0 }
+    }
+
+    private var chipFill: AnyShapeStyle {
+        switch style {
+        case .prominent:
+            return AnyShapeStyle(Color.accentColor.gradient)
+        case .quiet:
+            return AnyShapeStyle(
+                hovering
+                    ? Color.primary.opacity(0.06)
+                    : Color(nsColor: .controlBackgroundColor)
+            )
+        }
     }
 }
 
