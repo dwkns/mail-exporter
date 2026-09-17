@@ -173,7 +173,7 @@ Or Settings → Advanced → Install mail-exporter MCP.
 | `list_drafts` | Inventory `Drafts/` and `Sent/` Markdown. |
 | `create_job` / `edit_job` | Set up or change an export (never-send). |
 | `compose_draft` | Open Mail draft/reply from Markdown in `Drafts/`. |
-| `check_matches` / `export_job` | Refresh export from Apple Mail (then look for sent copies). |
+| `check_matches` / `export_job` | Refresh from Apple Mail. Pass `job_name` only; omit `job_id` / `force_full` unless needed. |
 
 Typical admin flow:
 

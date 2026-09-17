@@ -228,13 +228,89 @@ def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     import mailexporter_mcp as m
 
     importlib.reload(m)
-    with patch("mailexporter_mcp._run_engine") as run, patch(
+    with patch("mailexporter_mcp.run_export") as run, patch(
         "mailexporter_mcp.write_how_to"
     ) as wh:
-        run.return_value = {"ok": True, "results": [{"matchCount": 3}]}
+        run.return_value = ({"ok": True, "results": [{"matchCount": 3}]}, 0)
         wh.return_value = out / "_how_to_use.md"
         data = json.loads(m.export_job(job_name="DHL"))
         dry = json.loads(m.check_matches(job_name="DHL"))
+        nulls = json.loads(m.export_job(job_name="DHL", job_id=None, force_full=None))
     assert data["ok"] is True
     assert dry["ok"] is True
-    run.assert_called()
+    assert nulls["ok"] is True
+    assert run.call_count == 3
+    kwargs = run.call_args_list[0].kwargs
+    assert kwargs["job_name"] == "DHL"
+    assert kwargs["job_id"] is None
+    assert kwargs["force_full"] is False
+    assert kwargs["dry_run"] is False
+    assert run.call_args_list[1].kwargs["dry_run"] is True
+    assert "-m" not in str(run.call_args_list)
+    assert run.call_args_list[0].args == () or "engine" not in run.call_args_list[0].args
+
+
+def test_mcp_export_job_requires_selector(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = tmp_path / "jobs.json"
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
+    import importlib
+    import mailexporter_mcp as m
+
+    importlib.reload(m)
+    data = json.loads(m.export_job())
+    assert data["ok"] is False
+    assert "job_name" in data["error"]
+
+
+def test_find_engine_frozen_omits_module_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import mailexporter_mcp as m
+
+    exe = tmp_path / "MailExporterEngine"
+    exe.write_text("#!/bin/sh\n", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setattr(m.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(m.sys, "executable", str(exe))
+    prefix, cwd = m._find_engine()
+    assert prefix == [str(exe)]
+    assert "-m" not in prefix
+    assert prefix[1:] == []
+    assert cwd == exe.parent
+
+
+def test_run_engine_argv_is_export_not_engine_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Subprocess fallback must call MailExporterEngine export, not -m engine."""
+    import mailexporter_mcp as m
+
+    exe = tmp_path / "MailExporterEngine"
+    exe.write_text("#!/bin/sh\n", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.setattr(m.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(m.sys, "executable", str(exe))
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(tmp_path / "jobs.json"))
+
+    captured: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ANN001
+        captured.append(list(cmd))
+
+        class Proc:
+            returncode = 0
+            stdout = '{"ok": true}'
+            stderr = ""
+
+        return Proc()
+
+    with patch("mailexporter_mcp.subprocess.run", side_effect=fake_run):
+        m._run_engine(["export", "--json", "--job-name", "DHL"])
+    assert captured
+    cmd = captured[0]
+    assert cmd[0] == str(exe)
+    assert "-m" not in cmd
+    assert "engine" not in cmd
+    assert "export" in cmd

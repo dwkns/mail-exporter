@@ -20,6 +20,7 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from engine.cli import run_export  # noqa: E402
 from engine.compose_draft import compose_draft as _compose_draft  # noqa: E402
 from engine.compose_draft import compose_markdown_text  # noqa: E402
 from engine.criteria import parse_match  # noqa: E402
@@ -106,15 +107,32 @@ def _assert_clearable_export_folder(folder: Path) -> None:
         )
 
 
+_INSTALLED_ENGINE = Path(
+    "/Applications/MailExporter.app/Contents/Resources/"
+    "MailExporterEngine/MailExporterEngine"
+)
+
+
 def _find_engine() -> tuple[list[str], Path]:
-    """Return (argv_prefix, cwd) for running the engine."""
+    """Return (argv_prefix, cwd) for running the engine CLI.
+
+    Frozen MCP (``MailExporterEngine mcp``) must invoke this same binary
+    *without* ``-m engine``. That pair is a CPython interpreter option; the
+    bundled CLI treats ``engine`` as the subcommand and argparse fails with
+    ``invalid choice: 'engine'``.
+    """
+    if getattr(sys, "frozen", False):
+        exe = Path(sys.executable)
+        return [str(exe)], exe.parent
     env = os.environ.get("MAILEXPORTER_ENGINE", "").strip()
     candidates: list[Path] = []
     if env:
-        candidates.append(Path(env))
+        candidates.append(Path(env).expanduser())
+    candidates.append(_INSTALLED_ENGINE)
     candidates.append(
         _REPO
-        / "apps/MailExporter/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine"
+        / "apps/MailExporter/MailExporter.app/Contents/Resources/"
+        "MailExporterEngine/MailExporterEngine"
     )
     for path in candidates:
         if path.is_file() and os.access(path, os.X_OK):
@@ -125,6 +143,7 @@ def _find_engine() -> tuple[list[str], Path]:
 def _run_engine(args: list[str]) -> dict[str, Any]:
     prefix, cwd = _find_engine()
     config = _config_path()
+    # Bundled MailExporterEngine is the CLI. Never prefix args with "engine".
     cmd = prefix + ["--config", str(config), *args]
     env = os.environ.copy()
     # Prefer bundled rg when running via the app engine.
@@ -160,6 +179,30 @@ def _run_engine(args: list[str]) -> dict[str, Any]:
     payload["_exit"] = proc.returncode
     if err and "error" not in payload:
         payload["_stderr"] = err
+    return payload
+
+
+def _call_export(
+    *,
+    job_name: str | None = None,
+    job_id: str | None = None,
+    force_full: bool | None = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Run export in-process so frozen MCP never shells out with ``-m engine``."""
+    name = (job_name or "").strip()
+    jid = (job_id or "").strip()
+    if not name and not jid:
+        return {"ok": False, "error": "provide job_name or job_id"}
+    payload, code = run_export(
+        config=str(_config_path()),
+        job_id=jid or None,
+        job_name=name or None,
+        dry_run=dry_run,
+        force_full=bool(force_full),
+    )
+    payload.setdefault("ok", code == 0)
+    payload["_exit"] = code
     return payload
 
 
@@ -386,37 +429,43 @@ def compose_draft(path: str = "", markdown: str = "") -> str:
 
 
 @mcp.tool()
-def check_matches(job_name: str = "", job_id: str = "") -> str:
-    """Dry-run: count how many Apple Mail messages currently match a job."""
-    args = ["export", "--dry-run"]
-    if job_id:
-        args += ["--job-id", job_id]
-    elif job_name:
-        args += ["--job-name", job_name]
-    return json.dumps(_run_engine(args), indent=2)
+def check_matches(
+    job_name: str | None = None,
+    job_id: str | None = None,
+) -> str:
+    """Dry-run: count how many Apple Mail messages currently match a job.
+
+    Pass ``job_name`` (or ``job_id``). Other arguments are optional.
+    """
+    return json.dumps(
+        _call_export(job_name=job_name, job_id=job_id, dry_run=True),
+        indent=2,
+    )
 
 
 @mcp.tool()
 def export_job(
-    job_name: str = "",
-    job_id: str = "",
-    force_full: bool = False,
+    job_name: str | None = None,
+    job_id: str | None = None,
+    force_full: bool | None = False,
 ) -> str:
-    """Export matching messages from Apple Mail into the job's folder (incremental unless force_full)."""
-    args = ["export"]
-    if job_id:
-        args += ["--job-id", job_id]
-    elif job_name:
-        args += ["--job-name", job_name]
-    if force_full:
-        args.append("--force-full")
-    payload = _run_engine(args)
-    # Ensure howto exists after export
-    try:
-        job = _find_job(job_id=job_id or None, job_name=job_name or None)
-        write_how_to(Path(job.output_dir), mailbox_name=job.name)
-    except Exception:
-        pass
+    """Export matching messages from Apple Mail into the job's folder.
+
+    Pass ``job_name`` (or ``job_id``). Incremental unless ``force_full`` is true.
+    ``job_id`` and ``force_full`` may be omitted.
+    """
+    payload = _call_export(
+        job_name=job_name,
+        job_id=job_id,
+        force_full=force_full,
+        dry_run=False,
+    )
+    if payload.get("ok"):
+        try:
+            job = _find_job(job_id=job_id or None, job_name=job_name or None)
+            write_how_to(Path(job.output_dir), mailbox_name=job.name)
+        except Exception:
+            pass
     return json.dumps(payload, indent=2)
 
 

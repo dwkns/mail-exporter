@@ -27,6 +27,8 @@ That opens a draft. It never sends.
 
 Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`, `list_messages` (From/Subject/Date/Message-ID), `read_message`, `list_drafts`, `create_job`, `edit_job`, `compose_draft`, `check_matches`, `export_job`, `clear_target`, `write_howto`.
 
+`export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
+
 `read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must be relative to the `.md` (no `..`, `~/`, or absolute).
 
 ## Export folder

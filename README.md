@@ -148,7 +148,7 @@ PYTHONPATH="$(pwd)" .venv/bin/python -m mailexporter_mcp
 | `create_job` / `edit_job` | Set up or change an export |
 | `compose_draft` | Open a Mail draft from Markdown (AppleScript) |
 | `check_matches` | Dry-run: how many Mail messages currently match |
-| `export_job` | Refresh the folder from Apple Mail (incremental unless `force_full`) |
+| `export_job` | Refresh the folder from Apple Mail. Pass `job_name` (or `job_id`). Incremental unless `force_full` is true; both extras may be omitted. |
 | `clear_target` | Delete exported `.eml` files (debug / full redo) |
 | `write_howto` | Refresh `_how_to_use.md` in one folder, or every export folder if no job is given |
 
