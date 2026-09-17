@@ -14,7 +14,7 @@ on:
 
 jobs:
   test:
-    name: Pytest
+    name: Pytest + Swift typecheck
     if: github.event_name == 'pull_request'
     runs-on: macos-14
     steps:
@@ -33,6 +33,20 @@ jobs:
 
       - name: Run unit tests
         run: pytest -q
+
+      - name: Typecheck Swift UI
+        run: |
+          SRC="apps/MailExporter/Sources"
+          SWIFT_FILES=()
+          while IFS= read -r -d '' f; do
+            SWIFT_FILES+=("$f")
+          done < <(find "${SRC}" -name '*.swift' -print0 | sort -z)
+          swiftc \
+            "${SWIFT_FILES[@]}" \
+            -typecheck \
+            -sdk "$(xcrun --show-sdk-path)" \
+            -target arm64-apple-macos13 \
+            -parse-as-library
 
   build:
     name: Build MailExporter macOS App
