@@ -658,6 +658,7 @@ final class JobsStore: ObservableObject {
             if targetURL != url {
                 save()
             }
+            syncHowToUseToAllJobs()
         } catch {
             status = "Couldn’t open exports: \(error.localizedDescription)"
         }
@@ -704,6 +705,7 @@ final class JobsStore: ObservableObject {
                 let doc = try JSONDecoder().decode(JobsDocument.self, from: data)
                 jobs = doc.jobs
                 save()
+                syncHowToUseToAllJobs()
                 status = "Imported \(jobs.count) mailbox\(jobs.count == 1 ? "" : "es") from \(url.lastPathComponent)"
             } catch {
                 let alert = NSAlert()
@@ -850,6 +852,7 @@ final class JobsStore: ObservableObject {
         jobs[idx].outputDir = newPath
         refreshBookmark(for: idx)
         save()
+        writeHowToUseIfFolderExists(jobs[idx])
     }
 
     func promptChooseFolder(for jobID: String) {
@@ -865,6 +868,7 @@ final class JobsStore: ObservableObject {
             jobs[idx].outputDir = url.path
             refreshBookmark(for: idx)
             save()
+            writeHowToUseIfFolderExists(jobs[idx])
         }
     }
 
@@ -965,6 +969,19 @@ final class JobsStore: ObservableObject {
         save()
     }
 
+    /// Rewrite `_how_to_use.md` in every export folder that exists on this Mac.
+    /// Skips missing / moved / Trash folders. Identical files are left untouched.
+    func syncHowToUseToAllJobs() {
+        for job in jobs {
+            writeHowToUseIfFolderExists(job)
+        }
+    }
+
+    private func writeHowToUseIfFolderExists(_ job: ExportJob) {
+        guard case .exists(let url) = folderStatus(for: job) else { return }
+        writeHowToUse(in: url.path, mailboxName: job.name)
+    }
+
     private func writeHowToUse(in folderPath: String, mailboxName: String) {
         let dest = URL(fileURLWithPath: folderPath)
             .appendingPathComponent("_how_to_use.md")
@@ -983,6 +1000,9 @@ final class JobsStore: ObservableObject {
         let body = template
             .replacingOccurrences(of: "{{MAILBOX_NAME}}", with: mailboxName)
             .replacingOccurrences(of: "{{OUTPUT_DIR}}", with: folderPath)
+        if let existing = try? String(contentsOf: dest, encoding: .utf8), existing == body {
+            return
+        }
         try? body.write(to: dest, atomically: true, encoding: .utf8)
     }
 
@@ -998,7 +1018,7 @@ final class JobsStore: ObservableObject {
     Never send mail. Never invent email content.
     """
 
-    /// Insert or replace a job and write `jobs.json`. Does not touch the export folder.
+    /// Insert or replace a job and write `jobs.json`. Refreshes `_how_to_use.md` if the folder exists.
     func upsertJob(_ job: ExportJob) {
         if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
             jobs[idx] = job
@@ -1010,6 +1030,7 @@ final class JobsStore: ObservableObject {
             }
         }
         save()
+        writeHowToUseIfFolderExists(job)
     }
 
     /// Encode `jobs` plus an optional draft overlay to a temp file (Check Matches

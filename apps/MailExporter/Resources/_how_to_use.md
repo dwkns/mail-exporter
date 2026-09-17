@@ -2,6 +2,8 @@
 
 This file is for an AI assistant helping with admin on behalf of the mailbox owner.
 
+MailExporter rewrites this file whenever its bundled instructions change (typically after an app update). Re-read `_how_to_use.md` to pick up the latest version.
+
 ## What this folder contains
 
 Path: `{{OUTPUT_DIR}}`  
@@ -188,3 +190,4 @@ Typical admin flow:
 - Prefer MCP or files in **this** folder over searching the whole disk.
 - Never send mail automatically — only open drafts.
 - Keep unsent Markdown in `Drafts/`; MailExporter moves it to `Sent/` when an exported `.eml` shows it went out.
+- This file is the live copy of the app's how-to. After MailExporter updates, re-read it instead of relying on an earlier chat.

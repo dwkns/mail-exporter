@@ -31,6 +31,8 @@ def how_to_markdown(*, mailbox_name: str = "", output_dir: str = "") -> str:
 
 This file is for an AI assistant helping with admin on behalf of the mailbox owner.
 
+MailExporter rewrites this file whenever its bundled instructions change (typically after an app update). Re-read `_how_to_use.md` to pick up the latest version.
+
 ## What this folder contains
 
 Path: `{folder}`  
@@ -217,6 +219,7 @@ Typical admin flow:
 - Prefer MCP or files in **this** folder over searching the whole disk.
 - Never send mail automatically — only open drafts.
 - Keep unsent Markdown in `Drafts/`; MailExporter moves it to `Sent/` when an exported `.eml` shows it went out.
+- This file is the live copy of the app's how-to. After MailExporter updates, re-read it instead of relying on an earlier chat.
 """
 
 
@@ -232,8 +235,26 @@ def write_how_to(output_dir: Path, *, mailbox_name: str = "") -> Path:
     """Create/update `_how_to_use.md` in the export folder. Returns the path written."""
     output_dir = ensure_layout(output_dir)
     path = output_dir / HOW_TO_FILENAME
-    path.write_text(
-        how_to_markdown(mailbox_name=mailbox_name, output_dir=str(output_dir)),
-        encoding="utf-8",
-    )
+    body = how_to_markdown(mailbox_name=mailbox_name, output_dir=str(output_dir))
+    try:
+        if path.is_file() and path.read_text(encoding="utf-8") == body:
+            return path
+    except OSError:
+        pass
+    path.write_text(body, encoding="utf-8")
     return path
+
+
+def sync_how_to_all(jobs: list) -> list[Path]:
+    """Rewrite `_how_to_use.md` in every job folder that already exists on disk."""
+    written: list[Path] = []
+    for job in jobs:
+        raw = str(getattr(job, "output_dir", "") or "").strip()
+        name = str(getattr(job, "name", "") or "")
+        if not raw:
+            continue
+        folder = Path(raw).expanduser()
+        if not folder.is_dir():
+            continue
+        written.append(write_how_to(folder, mailbox_name=name))
+    return written
