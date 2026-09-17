@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Squircle glyph used on Export chips, job rows, and Settings groups.
+/// Squircle glyph used on Export chips and job rows.
 struct JobGlyph: View {
     let symbol: String
     let tint: Color
@@ -20,7 +20,7 @@ struct JobGlyph: View {
     }
 }
 
-/// Quiet well chip (New / Export All, and matching Settings actions).
+/// Quiet well chip (New / Export All). Label first, icon on the right.
 struct HeaderActionButton: View {
     let title: String
     let symbol: String
@@ -35,6 +35,11 @@ struct HeaderActionButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
                 ZStack {
                     if spinning {
                         ProgressView()
@@ -45,14 +50,9 @@ struct HeaderActionButton: View {
                         JobGlyph(symbol: symbol, tint: tint, size: 28)
                     }
                 }
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
             }
-            .padding(.leading, 5)
-            .padding(.trailing, 12)
+            .padding(.leading, 12)
+            .padding(.trailing, 5)
             .padding(.vertical, 5)
             .frame(width: width, alignment: .leading)
             .background(
@@ -77,31 +77,18 @@ struct HeaderActionButton: View {
     }
 }
 
-/// Inset grouped table used by the Export list and Settings sections.
-struct GroupedWell<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(spacing: 0) {
-            content()
+/// Title then symbol — used on every text+icon button.
+struct TrailingIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 5) {
+            configuration.title
+            configuration.icon
         }
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
-        )
     }
 }
 
-struct GroupedWellDivider: View {
-    var leading: CGFloat = 62
-
-    var body: some View {
-        Divider()
-            .padding(.leading, leading)
-            .padding(.trailing, 14)
-    }
+extension LabelStyle where Self == TrailingIconLabelStyle {
+    static var trailingIcon: TrailingIconLabelStyle { TrailingIconLabelStyle() }
 }
 
 /// Empty the window title so traffic lights stay and the pane heading is the name.

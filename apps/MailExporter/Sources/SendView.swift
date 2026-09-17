@@ -127,8 +127,9 @@ struct DraftDropZone: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                Button("Choose Files…") {
-                    chooseFiles()
+                Button(action: chooseFiles) {
+                    Label("Choose Files…", systemImage: "doc")
+                        .labelStyle(.trailingIcon)
                 }
                 .disabled(runner.busy)
                 if runner.busy {

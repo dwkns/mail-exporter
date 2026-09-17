@@ -728,12 +728,16 @@ private struct ExportJobRow: View {
                 if folderStatus.isValidForExport {
                     Button(action: onShowInFinder) {
                         Label("Show in Finder", systemImage: "folder")
+                            .labelStyle(.trailingIcon)
                     }
                     .accessibilityLabel("Show in Finder")
                     .help("Reveal the export folder in Finder")
                 } else {
-                    Button("Choose Folder…", action: onChooseFolder)
-                        .accessibilityLabel("Choose Folder")
+                    Button(action: onChooseFolder) {
+                        Label("Choose Folder…", systemImage: "folder")
+                            .labelStyle(.trailingIcon)
+                    }
+                    .accessibilityLabel("Choose Folder")
                 }
 
                 if debugMode && folderStatus.isValidForExport {
@@ -741,12 +745,15 @@ private struct ExportJobRow: View {
                         .disabled(busy)
                 }
 
-                Button("Export", action: onExport)
-                    .buttonStyle(.borderedProminent)
-                    .contentShape(Rectangle())
-                    .accessibilityLabel("Export")
-                    .disabled(busy || !folderStatus.isValidForExport)
-                    .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
+                Button(action: onExport) {
+                    Label("Export", systemImage: "tray.and.arrow.down")
+                        .labelStyle(.trailingIcon)
+                }
+                .buttonStyle(.borderedProminent)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Export")
+                .disabled(busy || !folderStatus.isValidForExport)
+                .help(folderStatus.isValidForExport ? "Export this job" : "Choose a valid folder before exporting")
             }
             .controlSize(.regular)
             .fixedSize(horizontal: true, vertical: false)

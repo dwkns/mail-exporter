@@ -54,8 +54,9 @@ struct PermissionsBanner: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 6) {
-                Button("Open Settings…") {
-                    settings.open()
+                Button(action: { settings.open() }) {
+                    Label("Open Settings…", systemImage: "gearshape")
+                        .labelStyle(.trailingIcon)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
