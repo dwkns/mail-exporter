@@ -1,5 +1,9 @@
 .venv/
 apps/MailExporter/build/
+apps/MailExporter/signing/DerivedData/
+apps/MailExporter/*.provisionprofile
+apps/MailExporter/*.mobileprovision
+apps/MailExporter/embedded.provisionprofile
 apps/MailExporter/MailExporter.app/
 apps/MailExporter/vendor/
 **/MailExporter.app/

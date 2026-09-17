@@ -81,19 +81,42 @@ struct StoragePreferencesView: View {
                     .truncationMode(.middle)
             }
 
+            storageStatusCopy
+
             HStack(alignment: .center, spacing: 12) {
                 Button(action: revealInFinder) {
                     Label("Reveal in Finder", systemImage: "folder")
                         .labelStyle(.trailingIcon)
                 }
-
-                if prefs.storageLocation == .iCloud && !JobsStore.isICloudAvailable {
-                    Text("iCloud is signed out or unavailable on this Mac. Using local Application Support until iCloud is available.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var storageStatusCopy: some View {
+        switch prefs.storageLocation {
+        case .iCloud:
+            if JobsStore.isICloudAvailable {
+                Text("Jobs sync through the private iCloud container on this Apple ID.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("iCloud is signed out or this build has no iCloud entitlement. Jobs are stored on this Mac until the container is available.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .local:
+            Text("Jobs stay on this Mac (Application Support). They do not sync.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .custom:
+            Text("Jobs are stored in the folder you chose.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

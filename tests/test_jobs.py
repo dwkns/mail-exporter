@@ -125,39 +125,41 @@ def test_default_jobs_path_resolution(monkeypatch: pytest.MonkeyPatch, tmp_path:
     from engine.jobs import default_jobs_path
 
     local_path = tmp_path / "Library/Application Support/MailExporter/jobs.json"
-    ubiquity_path = (
+    ubiquity_dot = (
         tmp_path
         / "Library/Mobile Documents/iCloud.com~dwkns~MailExporter/Documents/jobs.json"
+    )
+    ubiquity_tilde = (
+        tmp_path
+        / "Library/Mobile Documents/iCloud~com~dwkns~MailExporter/Documents/jobs.json"
     )
     legacy_path = (
         tmp_path / "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
     )
 
-    # Scenario 1: nothing exists -> local Application Support
+    # Nothing exists -> local Application Support
     assert default_jobs_path() == local_path
 
-    # Scenario 2: ubiquity container directory exists -> prefer ubiquity path
-    ubiquity_path.parent.mkdir(parents=True)
-    assert default_jobs_path() == ubiquity_path
+    # Empty ubiquity directory is not enough
+    ubiquity_dot.parent.mkdir(parents=True)
+    assert default_jobs_path() == local_path
 
-    # Scenario 3: local file only (no ubiquity file) -> local
-    # Remove ubiquity parent so we don't prefer empty container dirs
-    import shutil
-
-    shutil.rmtree(ubiquity_path.parent.parent)
+    # Local file wins over leftover CloudDocs
     local_path.parent.mkdir(parents=True, exist_ok=True)
     local_path.write_text("{}", encoding="utf-8")
-    assert default_jobs_path() == local_path
-
-    # Scenario 4: legacy CloudDocs file takes precedence over local
     legacy_path.parent.mkdir(parents=True, exist_ok=True)
     legacy_path.write_text("{}", encoding="utf-8")
-    assert default_jobs_path() == legacy_path
+    assert default_jobs_path() == local_path
 
-    # Scenario 5: ubiquity file wins over legacy + local
-    ubiquity_path.parent.mkdir(parents=True, exist_ok=True)
-    ubiquity_path.write_text("{}", encoding="utf-8")
-    assert default_jobs_path() == ubiquity_path
+    # Real ubiquity file (tilde layout used on this Mac) wins over local + CloudDocs
+    ubiquity_tilde.parent.mkdir(parents=True, exist_ok=True)
+    ubiquity_tilde.write_text("{}", encoding="utf-8")
+    assert default_jobs_path() == ubiquity_tilde
+
+    # Dot-style ubiquity name is also recognized
+    ubiquity_tilde.unlink()
+    ubiquity_dot.write_text("{}", encoding="utf-8")
+    assert default_jobs_path() == ubiquity_dot
 
 
 def test_load_job_with_bookmark(tmp_path: Path) -> None:
@@ -185,5 +187,55 @@ def test_load_job_with_bookmark(tmp_path: Path) -> None:
     assert len(loaded.jobs) == 1
     assert loaded.jobs[0].name == "Tracked Mailbox"
     assert loaded.jobs[0].output_dir == str(tmp_path / "Target")
+    assert loaded.jobs[0].extra.get("bookmark") == "Ym9va21hcms="
+    save_jobs(loaded, path)
+    assert json.loads(path.read_text(encoding="utf-8"))["jobs"][0]["bookmark"] == "Ym9va21hcms="
+
+
+def test_pointer_wins_over_leftover_clouddocs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("MAILEXPORTER_CONFIG", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    from engine.jobs import default_jobs_path
+
+    local_path = tmp_path / "Library/Application Support/MailExporter/jobs.json"
+    pointer = tmp_path / "Library/Application Support/MailExporter/jobs-location"
+    legacy_path = (
+        tmp_path / "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
+    )
+    custom = tmp_path / "chosen" / "jobs.json"
+    pointer.parent.mkdir(parents=True)
+    legacy_path.parent.mkdir(parents=True)
+    custom.parent.mkdir(parents=True)
+    local_path.write_text("{}", encoding="utf-8")
+    legacy_path.write_text("{}", encoding="utf-8")
+    custom.write_text("{}", encoding="utf-8")
+    pointer.write_text(str(custom) + "\n", encoding="utf-8")
+    assert default_jobs_path() == custom
+
+
+def test_local_pref_wins_over_leftover_ubiquity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("MAILEXPORTER_CONFIG", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    import plistlib
+
+    from engine.jobs import default_jobs_path
+
+    local_path = tmp_path / "Library/Application Support/MailExporter/jobs.json"
+    ubiquity = (
+        tmp_path
+        / "Library/Mobile Documents/iCloud~com~dwkns~MailExporter/Documents/jobs.json"
+    )
+    prefs = tmp_path / "Library/Preferences/com.dwkns.MailExporter.plist"
+    local_path.parent.mkdir(parents=True)
+    ubiquity.parent.mkdir(parents=True)
+    prefs.parent.mkdir(parents=True)
+    local_path.write_text("{}", encoding="utf-8")
+    ubiquity.write_text("{}", encoding="utf-8")
+    prefs.write_bytes(plistlib.dumps({"storageLocation": "local"}))
+    assert default_jobs_path() == local_path
 
 

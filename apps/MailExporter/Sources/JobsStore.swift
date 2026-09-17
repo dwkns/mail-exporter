@@ -306,6 +306,26 @@ final class JobsStore: ObservableObject {
             .appendingPathComponent("Library/Application Support/MailExporter/jobs.json")
     }
 
+    /// Plain-text path so CLI/MCP open the same jobs.json as this app.
+    static var jobsLocationPointerURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MailExporter/jobs-location")
+    }
+
+    static func writeJobsLocationPointer(_ url: URL) {
+        let pointer = jobsLocationPointerURL
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(
+                at: pointer.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try url.path.write(to: pointer, atomically: true, encoding: .utf8)
+        } catch {
+            // Engine still has filesystem fallbacks if the pointer cannot be written.
+        }
+    }
+
     static func defaultConfigURL() -> URL {
         let prefs = AppPreferences.shared
         switch prefs.storageLocation {
@@ -355,6 +375,7 @@ final class JobsStore: ObservableObject {
 
     init() {
         Self.autoMigrateToICloudIfNeeded()
+        Self.writeJobsLocationPointer(Self.defaultConfigURL())
         reload()
         refreshMailAccess()
     }
@@ -402,6 +423,7 @@ final class JobsStore: ObservableObject {
             AppPreferences.shared.customStoragePath = customPath
         }
         let targetURL = configURL.resolvingSymlinksInPath()
+        Self.writeJobsLocationPointer(targetURL)
         let fm = FileManager.default
         if !fm.fileExists(atPath: targetURL.path) && !previousJobs.isEmpty {
             save()
@@ -582,6 +604,7 @@ final class JobsStore: ObservableObject {
                 options: [.prettyPrinted, .sortedKeys]
             )
             try pretty.write(to: targetURL, options: .atomic)
+            Self.writeJobsLocationPointer(targetURL)
             status = "Saved"
         } catch {
             status = "Couldn’t save: \(error.localizedDescription)"

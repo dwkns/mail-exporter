@@ -89,9 +89,6 @@ def run_export(
     except MailAccessError as exc:
         return {"error": str(exc), "ok": False}, 1
 
-    if not dry_run:
-        save_jobs(jobs, path)
-
     line = " — ".join(r.get("line", "") for r in results)
     payload: dict = {
         "results": results,
