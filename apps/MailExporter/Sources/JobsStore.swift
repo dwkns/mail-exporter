@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Darwin
 import UniformTypeIdentifiers
 
 /// One Mail-style condition row.
@@ -263,6 +264,80 @@ enum FolderStatus: Equatable {
     }
 }
 
+/// Reloads `jobs.json` when iCloud (or another Mac) writes it.
+private final class JobsCloudPresenter: NSObject, NSFilePresenter {
+    var presentedItemURL: URL?
+    let presentedItemOperationQueue: OperationQueue
+    var onChange: (() -> Void)?
+
+    override init() {
+        let queue = OperationQueue()
+        queue.name = "com.dwkns.MailExporter.jobs-presenter"
+        queue.maxConcurrentOperationCount = 1
+        presentedItemOperationQueue = queue
+        super.init()
+    }
+
+    func presentedItemDidChange() {
+        onChange?()
+    }
+
+    func presentedItemDidMove(to newURL: URL) {
+        presentedItemURL = newURL
+        onChange?()
+    }
+
+    func accommodatePresentedItemDeletion(completionHandler: @escaping (Error?) -> Void) {
+        onChange?()
+        completionHandler(nil)
+    }
+}
+
+/// Owns the iCloud presenter + directory watch so JobsStore deinit stays isolation-safe.
+private final class JobsCloudWatch {
+    private var presenter: JobsCloudPresenter?
+    private var watch: DispatchSourceFileSystemObject?
+
+    func stop() {
+        if let presenter {
+            NSFileCoordinator.removeFilePresenter(presenter)
+        }
+        presenter = nil
+        watch?.cancel()
+        watch = nil
+    }
+
+    func start(url: URL, onChange: @escaping () -> Void) {
+        stop()
+        let presenter = JobsCloudPresenter()
+        presenter.presentedItemURL = url
+        presenter.onChange = onChange
+        NSFileCoordinator.addFilePresenter(presenter)
+        self.presenter = presenter
+
+        let folder = url.deletingLastPathComponent()
+        let fd = open(folder.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete, .extend, .attrib],
+            queue: .main
+        )
+        source.setEventHandler {
+            onChange()
+        }
+        source.setCancelHandler {
+            close(fd)
+        }
+        source.resume()
+        watch = source
+    }
+
+    deinit {
+        stop()
+    }
+}
+
 @MainActor
 final class JobsStore: ObservableObject {
     @Published var jobs: [ExportJob] = []
@@ -271,6 +346,10 @@ final class JobsStore: ObservableObject {
     /// Shown when Mail library access is blocked.
     @Published var needsFullDiskAccess: Bool = false
     @Published var needsAccessibility: Bool = false
+
+    private let cloudWatch = JobsCloudWatch()
+    private var ignoreCloudReloadUntil = Date.distantPast
+    private var ubiquityObserver: NSObjectProtocol?
 
     /// Private iCloud ubiquity container (does not appear as an iCloud Drive folder).
     static let iCloudContainerIdentifier = "iCloud.com.dwkns.MailExporter"
@@ -375,9 +454,108 @@ final class JobsStore: ObservableObject {
 
     init() {
         Self.autoMigrateToICloudIfNeeded()
+        Self.ensureICloudJobsDownloaded()
         Self.writeJobsLocationPointer(Self.defaultConfigURL())
         reload()
         refreshMailAccess()
+        startWatchingJobsFile()
+        observeUbiquityIdentity()
+    }
+
+    /// Ask iCloud to materialize `jobs.json` (and its Documents folder) if the
+    /// item exists in the cloud but is not yet local.
+    static func ensureICloudJobsDownloaded() {
+        guard let url = defaultICloudURL else { return }
+        let fm = FileManager.default
+        let folder = url.deletingLastPathComponent()
+        try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? fm.startDownloadingUbiquitousItem(at: folder)
+        if fm.fileExists(atPath: url.path) || fm.isUbiquitousItem(at: url) {
+            try? fm.startDownloadingUbiquitousItem(at: url)
+        }
+    }
+
+    private func observeUbiquityIdentity() {
+        ubiquityObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.NSUbiquityIdentityDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleUbiquityIdentityChange()
+            }
+        }
+    }
+
+    private func handleUbiquityIdentityChange() {
+        Self.autoMigrateToICloudIfNeeded()
+        Self.ensureICloudJobsDownloaded()
+        Self.writeJobsLocationPointer(Self.defaultConfigURL())
+        reload()
+        startWatchingJobsFile()
+    }
+
+    private func startWatchingJobsFile() {
+        let url = configURL
+        cloudWatch.start(url: url) { [weak self] in
+            Task { @MainActor in
+                self?.reloadIfExternalChange()
+            }
+        }
+    }
+
+    private func reloadIfExternalChange() {
+        if Date() < ignoreCloudReloadUntil { return }
+        reload()
+    }
+
+    static func coordinateRead(from url: URL) throws -> Data {
+        let fm = FileManager.default
+        if fm.isUbiquitousItem(at: url) {
+            try? fm.startDownloadingUbiquitousItem(at: url)
+        }
+        var coordError: NSError?
+        var result: Data?
+        var readError: Error?
+        NSFileCoordinator().coordinate(
+            readingItemAt: url,
+            options: [],
+            error: &coordError
+        ) { readable in
+            do {
+                result = try Data(contentsOf: readable)
+            } catch {
+                readError = error
+            }
+        }
+        if let coordError { throw coordError }
+        if let readError { throw readError }
+        guard let result else {
+            throw NSError(
+                domain: "MailExporter",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Couldn’t read jobs.json"]
+            )
+        }
+        return result
+    }
+
+    static func coordinateWrite(_ data: Data, to url: URL) throws {
+        var coordError: NSError?
+        var writeError: Error?
+        NSFileCoordinator().coordinate(
+            writingItemAt: url,
+            options: .forReplacing,
+            error: &coordError
+        ) { writable in
+            do {
+                try data.write(to: writable, options: .atomic)
+            } catch {
+                writeError = error
+            }
+        }
+        if let coordError { throw coordError }
+        if let writeError { throw writeError }
     }
 
     /// Migrates jobs.json into the private ubiquity container once, preferring the
@@ -430,6 +608,7 @@ final class JobsStore: ObservableObject {
         } else {
             reload()
         }
+        startWatchingJobsFile()
     }
 
     func reload() {
@@ -451,7 +630,7 @@ final class JobsStore: ObservableObject {
             return
         }
         do {
-            let data = try Data(contentsOf: targetURL)
+            let data = try Self.coordinateRead(from: targetURL)
             let doc = try JSONDecoder().decode(JobsDocument.self, from: data)
             jobs = doc.jobs
             if selectedID == nil {
@@ -461,8 +640,6 @@ final class JobsStore: ObservableObject {
             status = n == 1 ? "1 export" : "\(n) exports"
             if targetURL != url {
                 save()
-            } else {
-                detectMovedTargetFolders()
             }
         } catch {
             status = "Couldn’t open exports: \(error.localizedDescription)"
@@ -603,9 +780,11 @@ final class JobsStore: ObservableObject {
                 withJSONObject: obj,
                 options: [.prettyPrinted, .sortedKeys]
             )
-            try pretty.write(to: targetURL, options: .atomic)
+            ignoreCloudReloadUntil = Date().addingTimeInterval(1.5)
+            try Self.coordinateWrite(pretty, to: targetURL)
             Self.writeJobsLocationPointer(targetURL)
             status = "Saved"
+            startWatchingJobsFile()
         } catch {
             status = "Couldn’t save: \(error.localizedDescription)"
         }
@@ -740,56 +919,20 @@ final class JobsStore: ObservableObject {
         return nil
     }
 
-    /// Detect if any export target folders have been moved or renamed on disk.
-    /// Updates the job's outputDir and bookmark and saves jobs.json if any moves are detected.
+    /// Bookmarks can show a moved folder. Never rewrite `outputDir` — the row
+    /// offers **Use Found**. Silent rewrites break iCloud (paths/bookmarks are per-Mac).
     @discardableResult
     func detectMovedTargetFolders(jobID: String? = nil) -> [(job: ExportJob, oldPath: String, newPath: String)] {
         var moved: [(job: ExportJob, oldPath: String, newPath: String)] = []
-        let fm = FileManager.default
-        var dirty = false
 
         for i in jobs.indices {
             if let jobID = jobID, jobs[i].id != jobID {
                 continue
             }
             let job = jobs[i]
-            guard let b64 = job.bookmark, let data = Data(base64Encoded: b64) else {
-                refreshBookmark(for: i)
-                if jobs[i].bookmark != nil { dirty = true }
-                continue
+            if case .moved(let suggestedURL) = folderStatus(for: job) {
+                moved.append((job: job, oldPath: job.outputDir, newPath: suggestedURL.path))
             }
-
-            var isStale = false
-            if let resolvedURL = try? URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale) {
-                let resolvedPath = resolvedURL.resolvingSymlinksInPath().path
-                let currentPath = ((job.outputDir as NSString).expandingTildeInPath as NSString).resolvingSymlinksInPath
-
-                var isDir: ObjCBool = false
-                if resolvedPath != currentPath && fm.fileExists(atPath: resolvedPath, isDirectory: &isDir) && isDir.boolValue {
-                    // Do not auto-update to Trash
-                    if !resolvedPath.contains("/.Trash/") && !resolvedPath.contains("/Trash/") {
-                        let old = job.outputDir
-                        jobs[i].outputDir = resolvedPath
-                        if let fresh = try? resolvedURL.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) {
-                            jobs[i].bookmark = fresh.base64EncodedString()
-                        }
-                        moved.append((job: jobs[i], oldPath: old, newPath: resolvedPath))
-                        dirty = true
-                    }
-                } else if isStale {
-                    if let fresh = try? resolvedURL.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) {
-                        jobs[i].bookmark = fresh.base64EncodedString()
-                        dirty = true
-                    }
-                }
-            } else {
-                refreshBookmark(for: i)
-                if jobs[i].bookmark != b64 { dirty = true }
-            }
-        }
-
-        if dirty {
-            saveWithoutMoveDetection()
         }
         return moved
     }
