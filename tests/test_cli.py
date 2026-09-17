@@ -112,3 +112,31 @@ def test_draft_alias_matches_append_draft(tmp_path: Path, capsys) -> None:
     compose.assert_called_once()
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
+
+
+def test_export_json_only_stdout(tmp_path: Path, capsys) -> None:
+    config = tmp_path / "jobs.json"
+    raw = {
+        "jobs": [
+            {
+                "id": "job-1",
+                "name": "Tracked",
+                "outputDir": str(tmp_path / "out"),
+                "match": {
+                    "conjunction": "any",
+                    "conditions": [
+                        {"field": "entire", "op": "contains", "values": ["x"]}
+                    ],
+                },
+            }
+        ]
+    }
+    config.write_text(json.dumps(raw), encoding="utf-8")
+    with patch("engine.cli.run_job") as run_job:
+        run_job.return_value = {"line": "Up to date", "countMatch": True}
+        code = main(["--config", str(config), "export", "--json"])
+    assert code == 0
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("{")
+    payload = json.loads(out)
+    assert payload["ok"] is True

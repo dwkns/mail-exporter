@@ -161,10 +161,10 @@ def parse_markdown_draft(text: str, *, source_path: Path | None = None) -> Draft
 
 
 def resolve_attachments(spec: DraftSpec) -> list[Path]:
-    """Resolve Attach: paths relative to the .md file (``..`` is allowed).
+    """Resolve Attach: paths relative to the .md file (no ``..``).
 
     Missing files are skipped (Mail still opens the draft and reports them).
-    Absolute paths and ``~/…`` raise ValueError.
+    Absolute paths, ``~/…``, and ``..`` raise ValueError.
     """
     base = (spec.source_path.parent if spec.source_path else Path.cwd()).resolve()
     out: list[Path] = []
@@ -174,7 +174,15 @@ def resolve_attachments(spec: DraftSpec) -> list[Path]:
         if expanded.is_absolute() or raw.startswith("~"):
             denied.append(raw)
             continue
+        if ".." in Path(raw).parts:
+            denied.append(raw)
+            continue
         p = (base / expanded).resolve()
+        try:
+            p.relative_to(base)
+        except ValueError:
+            denied.append(raw)
+            continue
         if p.is_file():
             out.append(p)
     if denied:

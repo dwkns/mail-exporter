@@ -108,7 +108,15 @@ def test_seed_dhl_from_and_date() -> None:
 def test_job_to_dict_shape() -> None:
     job = seed_dhl_job()
     d = job.to_dict()
-    assert set(d) >= {"id", "name", "outputDir", "includeSent", "includeBin", "match"}
+    assert set(d) >= {
+        "id",
+        "name",
+        "outputDir",
+        "includeSent",
+        "includeBin",
+        "includeThread",
+        "match",
+    }
     assert isinstance(d["match"], dict)
 
 

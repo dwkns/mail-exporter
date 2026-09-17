@@ -156,13 +156,12 @@ def test_resolve_attachments_tilde_denied(tmp_path: Path) -> None:
         resolve_attachments(spec)
 
 
-def test_resolve_attachments_parent_relative(tmp_path: Path) -> None:
+def test_resolve_attachments_parent_relative_denied(tmp_path: Path) -> None:
     drafts = tmp_path / "Email" / "Drafts"
     source = tmp_path / "_source_files"
     drafts.mkdir(parents=True)
     source.mkdir()
-    pdf = source / "scan.pdf"
-    pdf.write_bytes(b"%PDF")
+    (source / "scan.pdf").write_bytes(b"%PDF")
     md = drafts / "d.md"
     md.write_text(
         "---\nTo: a@b.com\nSubject: x\n"
@@ -170,7 +169,8 @@ def test_resolve_attachments_parent_relative(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     spec = parse_markdown_draft(md.read_text(encoding="utf-8"), source_path=md)
-    assert resolve_attachments(spec) == [pdf.resolve()]
+    with pytest.raises(ValueError, match="relative"):
+        resolve_attachments(spec)
 
 
 def test_split_addrs_preserves_quoted_commas() -> None:

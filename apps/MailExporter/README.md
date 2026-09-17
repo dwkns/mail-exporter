@@ -4,7 +4,7 @@
 
 ```bash
 ./build.sh
-open MailExporter.app
+open /Applications/MailExporter.app
 ```
 
 Produces a **self-contained** app: Swift UI + bundled `MailExporterEngine` (no Homebrew Python/`rg` at runtime). Signed with your Apple Development identity when available.
@@ -15,8 +15,8 @@ Enable **only MailExporter** in System Settings → Privacy & Security → Full 
 
 ## Window
 
-One **Export** pane:
+One **Export** pane. Empty title bar (traffic lights stay). In-pane heading **Mail Exporter** with the app icon.
 
-- Job list (scrolls if needed) with **Export**, **Show in Finder**, and **Edit** per job
-- **Add Export** opens a sheet for criteria, output folder, include sent/bin, and name
+- Job list (scrolls if needed) with **Export**, **Show in Finder**, **Open in Cursor**, and **Edit** per job
+- Header **+** opens New Export; **Export All** is the primary action
 - Always-visible drop zone at the bottom: Markdown → Apple Mail draft (never sends)

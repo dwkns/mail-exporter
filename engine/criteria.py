@@ -339,6 +339,13 @@ def match_message(spec: MatchSpec, msg_bytes: bytes) -> bool:
     return all(results)
 
 
+def spec_needs_body(spec: MatchSpec) -> bool:
+    for clause in spec.clauses:
+        if clause.field in ("body", "entire"):
+            return True
+    return False
+
+
 def search_terms(spec: MatchSpec) -> list[str]:
     terms: list[str] = []
     for c in spec.clauses:

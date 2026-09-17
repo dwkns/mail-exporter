@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import tempfile
+import time
 from pathlib import Path
 
 from engine.draft_md import parse_markdown_draft, resolve_attachments
@@ -98,11 +98,21 @@ def compose_draft(md_path: Path, **_kwargs) -> dict:
 
 
 def compose_markdown_text(markdown: str, **kwargs) -> dict:
-    fd, name = tempfile.mkstemp(prefix="mailexporter-", suffix=".md")
-    os.close(fd)
-    path = Path(name)
-    try:
-        path.write_text(markdown, encoding="utf-8")
-        return compose_draft(path, **kwargs)
-    finally:
-        path.unlink(missing_ok=True)
+    from engine.howto import DRAFTS_SUBDIR
+    from engine.jobs import default_jobs_path, load_jobs
+
+    dest_dir: Path | None = None
+    jobs = load_jobs(default_jobs_path()).jobs
+    for job in jobs:
+        folder = Path(job.output_dir).expanduser()
+        drafts = folder / DRAFTS_SUBDIR
+        if drafts.is_dir() or folder.is_dir():
+            dest_dir = drafts
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            break
+    if dest_dir is None:
+        dest_dir = Path.home() / "Library/Application Support/MailExporter/Drafts"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    path = dest_dir / f"compose-{int(time.time())}.md"
+    path.write_text(markdown, encoding="utf-8")
+    return compose_draft(path, **kwargs)

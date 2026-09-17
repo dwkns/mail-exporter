@@ -77,7 +77,7 @@ def test_rejects_absolute_attach(tmp_path: Path) -> None:
     assert "attachment path" in result["error"].lower() or "under" in result["error"].lower()
 
 
-def test_parent_relative_attach_still_opens_mail(tmp_path: Path) -> None:
+def test_parent_relative_attach_is_rejected(tmp_path: Path) -> None:
     drafts = tmp_path / "Email" / "Drafts"
     source = tmp_path / "_source_files"
     drafts.mkdir(parents=True)
@@ -89,16 +89,9 @@ def test_parent_relative_attach_still_opens_mail(tmp_path: Path) -> None:
         "Attach: ../../_source_files/scan.pdf\n---\n\nhi\n",
         encoding="utf-8",
     )
-    script = tmp_path / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=0, stdout="OK\n", stderr="")
-    with (
-        patch("engine.compose_draft.applescript_path", return_value=script),
-        patch("engine.compose_draft.subprocess.run", return_value=proc) as run,
-    ):
-        result = compose_draft(md)
-    run.assert_called_once()
-    assert result["ok"] is True
+    result = compose_draft(md)
+    assert result["ok"] is False
+    assert "attachment" in result["error"].lower() or "relative" in result["error"].lower()
 
 
 def test_missing_attach_still_opens_mail(tmp_path: Path) -> None:
@@ -119,15 +112,25 @@ def test_missing_attach_still_opens_mail(tmp_path: Path) -> None:
     assert result["ok"] is True
 
 
-def test_compose_markdown_text_writes_temp_and_routes(tmp_path: Path) -> None:
+def test_compose_markdown_text_persists_into_drafts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.jobs import JobsFile, save_jobs, seed_dhl_job
+
+    out = tmp_path / "export"
+    job = seed_dhl_job()
+    job.output_dir = str(out)
+    config = tmp_path / "jobs.json"
+    save_jobs(JobsFile(jobs=[job]), config)
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
     with patch("engine.compose_draft.compose_draft") as cd:
         cd.return_value = {"ok": True, "via": "mail"}
-        out = compose_markdown_text("---\nTo: a@b.com\nSubject: x\n---\n\nhi\n")
-    assert out["ok"] is True
-    cd.assert_called_once()
+        result = compose_markdown_text("---\nTo: a@b.com\nSubject: x\n---\n\nhi\n")
+    assert result["ok"] is True
     path_arg = cd.call_args[0][0]
     assert path_arg.suffix == ".md"
-    assert not path_arg.exists()  # cleaned up in finally
+    assert path_arg.parent.name == "Drafts"
+    assert path_arg.exists()
 
 
 def test_applescript_path_from_installed_engine_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

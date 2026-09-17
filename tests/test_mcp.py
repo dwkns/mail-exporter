@@ -144,3 +144,97 @@ def test_mcp_clear_target_requires_markers(
     assert ok.get("ok") is True
     assert ok["removedEml"] == 1
     assert not (out / "a.eml").exists()
+
+
+def test_mcp_list_messages_includes_headers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from engine.jobs import JobsFile, save_jobs, seed_dhl_job
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "msg.eml").write_text(
+        "From: a@b.com\nTo: c@d.com\nSubject: Hi\nDate: Wed, 5 Mar 2026 10:00:00 +0000\n"
+        "Message-ID: <x@y>\nIn-Reply-To: <z@y>\n\nBody\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "jobs.json"
+    job = seed_dhl_job()
+    job.output_dir = str(out)
+    save_jobs(JobsFile(jobs=[job]), config)
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
+
+    import importlib
+    import mailexporter_mcp as m
+
+    importlib.reload(m)
+    data = json.loads(m.list_messages(job_name="DHL"))
+    assert data["count"] == 1
+    assert data["messages"][0]["subject"] == "Hi"
+    assert data["messages"][0]["from"] == "a@b.com"
+    assert data["messages"][0]["messageId"] == "<x@y>"
+    assert data["threads"]
+
+
+def test_mcp_create_edit_and_list_drafts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = tmp_path / "jobs.json"
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
+    import importlib
+    import mailexporter_mcp as m
+
+    importlib.reload(m)
+    created = json.loads(
+        m.create_job(
+            name="Invoices",
+            output_dir=str(tmp_path / "inv"),
+            match_json=json.dumps(
+                {
+                    "conjunction": "any",
+                    "conditions": [
+                        {"field": "subject", "op": "contains", "values": ["invoice"]}
+                    ],
+                }
+            ),
+        )
+    )
+    assert created["ok"] is True
+    assert created["job"]["name"] == "Invoices"
+
+    drafts = tmp_path / "inv" / "Drafts"
+    drafts.mkdir(parents=True, exist_ok=True)
+    (drafts / "001_a_hello.md").write_text("---\nTo: a@b.com\nSubject: x\n---\n\nhi\n")
+
+    listed = json.loads(m.list_drafts(job_name="Invoices"))
+    assert listed["drafts"][0]["filename"] == "001_a_hello.md"
+
+    edited = json.loads(m.edit_job(job_name="Invoices", include_thread="true"))
+    assert edited["ok"] is True
+    assert edited["job"]["includeThread"] is True
+
+
+def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from engine.jobs import JobsFile, save_jobs, seed_dhl_job
+
+    out = tmp_path / "out"
+    out.mkdir()
+    config = tmp_path / "jobs.json"
+    job = seed_dhl_job()
+    job.output_dir = str(out)
+    save_jobs(JobsFile(jobs=[job]), config)
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
+    import importlib
+    import mailexporter_mcp as m
+
+    importlib.reload(m)
+    with patch("mailexporter_mcp._run_engine") as run, patch(
+        "mailexporter_mcp.write_how_to"
+    ) as wh:
+        run.return_value = {"ok": True, "results": [{"matchCount": 3}]}
+        wh.return_value = out / "_how_to_use.md"
+        data = json.loads(m.export_job(job_name="DHL"))
+        dry = json.loads(m.check_matches(job_name="DHL"))
+    assert data["ok"] is True
+    assert dry["ok"] is True
+    run.assert_called()

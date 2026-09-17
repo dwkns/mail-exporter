@@ -815,9 +815,7 @@ end mmdLog
 
 
 on mmdWriteLog()
-	try
-		mmdWriteTextFile("/tmp/make-mail-draft.log", mmdLogText)
-	end try
+	-- Intentionally empty: a /tmp log leaked subjects and attach paths.
 end mmdWriteLog
 
 
@@ -1274,8 +1272,8 @@ on mmdResolvePath(aPath, baseFolder)
 	end if
 
 	if aPath is "" then error "empty attachment path"
-	if aPath starts with "/" or aPath starts with "~" then
-		error "attachment path must be relative (no absolute or ~/…): " & aPath
+	if aPath contains ".." then
+		error "attachment path must not contain ..: " & aPath
 	end if
 
 	if baseFolder is "" then return aPath

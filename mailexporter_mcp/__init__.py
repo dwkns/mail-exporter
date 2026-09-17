@@ -22,8 +22,9 @@ if str(_REPO) not in sys.path:
 
 from engine.compose_draft import compose_draft as _compose_draft  # noqa: E402
 from engine.compose_draft import compose_markdown_text  # noqa: E402
-from engine.howto import HOW_TO_FILENAME, write_how_to  # noqa: E402
-from engine.jobs import default_jobs_path, load_jobs  # noqa: E402
+from engine.criteria import parse_match  # noqa: E402
+from engine.howto import DRAFTS_SUBDIR, HOW_TO_FILENAME, SENT_SUBDIR, write_how_to  # noqa: E402
+from engine.jobs import Job, JobsFile, default_jobs_path, load_jobs, save_jobs  # noqa: E402
 
 mcp = FastMCP("mail-exporter")
 
@@ -230,7 +231,7 @@ def _body_text(msg: Message, limit: int = 120_000) -> str:
 
 @mcp.tool()
 def list_jobs() -> str:
-    """List MailExporter smart mailboxes (jobs) and their export folders."""
+    """List MailExporter jobs (exports) and their folders."""
     path = _config_path()
     jobs = load_jobs(path).jobs
     rows = [
@@ -240,6 +241,7 @@ def list_jobs() -> str:
             "outputDir": j.output_dir,
             "includeSent": j.include_sent,
             "includeBin": j.include_bin,
+            "includeThread": j.include_thread,
         }
         for j in jobs
     ]
@@ -248,21 +250,81 @@ def list_jobs() -> str:
 
 @mcp.tool()
 def list_messages(job_name: str = "", job_id: str = "", limit: int = 100) -> str:
-    """List exported .eml files for a job (newest filenames last)."""
+    """List exported .eml files for a job with From/Subject/Date/Message-ID.
+
+    Newest filenames last. Threads are grouped by In-Reply-To / References.
+    """
     job = _find_job(job_id=job_id or None, job_name=job_name or None)
     folder = Path(job.output_dir).expanduser()
     if not folder.is_dir():
         return json.dumps({"error": f"folder missing: {folder}", "job": job.name})
     files = sorted(folder.glob("*.eml"), key=lambda p: p.name)
+    total = len(files)
     if limit > 0:
         files = files[-limit:]
+    messages: list[dict[str, Any]] = []
+    by_id: dict[str, str] = {}
+    for path in files:
+        try:
+            raw = path.read_bytes()
+            msg = email.message_from_bytes(raw)
+        except Exception:
+            messages.append({"filename": path.name, "path": str(path), "error": "unreadable"})
+            continue
+        mid = (msg.get("Message-ID") or msg.get("Message-Id") or "").strip()
+        in_reply = (msg.get("In-Reply-To") or "").strip()
+        refs = (msg.get("References") or "").strip()
+        row = {
+            "filename": path.name,
+            "path": str(path),
+            "from": _decode_hdr(msg.get("From")),
+            "subject": _decode_hdr(msg.get("Subject")),
+            "date": msg.get("Date") or "",
+            "messageId": mid,
+            "inReplyTo": in_reply,
+            "references": refs,
+        }
+        messages.append(row)
+        if mid:
+            by_id[mid.strip().lower()] = path.name
+
+    threads: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in messages:
+        key = row.get("filename") or ""
+        if key in seen:
+            continue
+        root = (row.get("inReplyTo") or "").strip().lower()
+        group = [row]
+        seen.add(key)
+        if root:
+            for other in messages:
+                oname = other.get("filename") or ""
+                if oname in seen:
+                    continue
+                omid = (other.get("messageId") or "").strip().lower()
+                oin = (other.get("inReplyTo") or "").strip().lower()
+                oref = (other.get("references") or "").lower()
+                if omid == root or oin == root or (root and root in oref):
+                    group.append(other)
+                    seen.add(oname)
+        threads.append(
+            {
+                "root": row.get("inReplyTo") or row.get("messageId") or key,
+                "messages": [
+                    {"filename": m.get("filename"), "subject": m.get("subject"), "messageId": m.get("messageId")}
+                    for m in group
+                ],
+            }
+        )
     return json.dumps(
         {
             "job": job.name,
             "jobId": job.id,
             "outputDir": str(folder),
-            "count": len(list(folder.glob("*.eml"))),
-            "messages": [{"filename": p.name, "path": str(p)} for p in files],
+            "count": total,
+            "messages": messages,
+            "threads": threads,
         },
         indent=2,
     )
@@ -305,7 +367,7 @@ def compose_draft(path: str = "", markdown: str = "") -> str:
     """Open a Mail draft from a Markdown email file (or inline markdown). Never sends.
 
     Front-matter: To/Cc/Bcc/Subject/From/In-Reply-To/Reply/Attach/Format.
-    Attach paths are relative to the .md file's folder (``..`` allowed; no ``~/`` or absolute).
+    Attach paths are relative to the .md file's folder (no ``..``, ``~/``, or absolute).
     Uses AppleScript (native reply quote; GUI Attach Files for reply+attachments).
     """
     try:
@@ -396,6 +458,160 @@ def write_howto(job_name: str = "", job_id: str = "") -> str:
     job = _find_job(job_id=job_id or None, job_name=job_name or None)
     path = write_how_to(Path(job.output_dir), mailbox_name=job.name)
     return json.dumps({"wrote": str(path), "job": job.name}, indent=2)
+
+
+def _job_row(j: Job) -> dict[str, Any]:
+    return {
+        "id": j.id,
+        "name": j.name,
+        "outputDir": j.output_dir,
+        "includeSent": j.include_sent,
+        "includeBin": j.include_bin,
+        "includeThread": j.include_thread,
+    }
+
+
+@mcp.tool()
+def list_drafts(job_name: str = "", job_id: str = "") -> str:
+    """List Markdown files in a job's Drafts/ and Sent/ folders."""
+    job = _find_job(job_id=job_id or None, job_name=job_name or None)
+    folder = Path(job.output_dir).expanduser()
+    drafts = folder / DRAFTS_SUBDIR
+    sent = folder / SENT_SUBDIR
+
+    def _md(root: Path) -> list[dict[str, str]]:
+        if not root.is_dir():
+            return []
+        rows = []
+        for p in sorted(root.glob("*.md"), key=lambda x: x.name):
+            rows.append({"filename": p.name, "path": str(p)})
+        return rows
+
+    return json.dumps(
+        {
+            "job": job.name,
+            "jobId": job.id,
+            "outputDir": str(folder),
+            "drafts": _md(drafts),
+            "sent": _md(sent),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def create_job(
+    name: str,
+    output_dir: str,
+    match_json: str = "",
+    include_sent: bool = True,
+    include_bin: bool = False,
+    include_thread: bool = False,
+) -> str:
+    """Create a MailExporter job. match_json is a MatchSpec object (same shape as jobs.json)."""
+    name = name.strip()
+    output_dir = output_dir.strip()
+    if not name:
+        return json.dumps({"ok": False, "error": "name required"})
+    if not output_dir:
+        return json.dumps({"ok": False, "error": "output_dir required"})
+    raw_match: dict[str, Any]
+    if match_json.strip():
+        try:
+            parsed = json.loads(match_json)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"ok": False, "error": f"match_json: {exc}"})
+        if not isinstance(parsed, dict):
+            return json.dumps({"ok": False, "error": "match_json must be an object"})
+        raw_match = parsed
+    else:
+        raw_match = {
+            "conjunction": "any",
+            "conditions": [
+                {"field": "entire", "op": "contains", "values": [name]}
+            ],
+        }
+    try:
+        match = parse_match(raw_match)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+    path = _config_path()
+    jobs = load_jobs(path)
+    if any(j.name.lower() == name.lower() for j in jobs.jobs):
+        return json.dumps({"ok": False, "error": f"job already exists: {name}"})
+    import uuid
+
+    job = Job(
+        id=str(uuid.uuid4()),
+        name=name,
+        output_dir=output_dir,
+        match=match,
+        include_sent=include_sent,
+        include_bin=include_bin,
+        include_thread=include_thread,
+    )
+    jobs.jobs.append(job)
+    save_jobs(jobs, path)
+    try:
+        write_how_to(Path(output_dir), mailbox_name=name)
+    except Exception:
+        pass
+    return json.dumps({"ok": True, "job": _job_row(job), "config": str(path)}, indent=2)
+
+
+@mcp.tool()
+def edit_job(
+    job_name: str = "",
+    job_id: str = "",
+    name: str = "",
+    output_dir: str = "",
+    match_json: str = "",
+    include_sent: str = "",
+    include_bin: str = "",
+    include_thread: str = "",
+) -> str:
+    """Update an existing job. Empty strings leave that field unchanged."""
+    try:
+        job = _find_job(job_id=job_id or None, job_name=job_name or None)
+    except ValueError as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+    path = _config_path()
+    jobs = load_jobs(path)
+    target = None
+    for j in jobs.jobs:
+        if j.id == job.id:
+            target = j
+            break
+    if target is None:
+        return json.dumps({"ok": False, "error": "job not found after reload"})
+    if name.strip():
+        target.name = name.strip()
+    if output_dir.strip():
+        target.output_dir = output_dir.strip()
+    if match_json.strip():
+        try:
+            parsed = json.loads(match_json)
+            if not isinstance(parsed, dict):
+                raise ValueError("match_json must be an object")
+            target.match = parse_match(parsed)
+        except (json.JSONDecodeError, ValueError) as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+
+    def _opt_bool(raw: str, current: bool) -> bool:
+        s = raw.strip().lower()
+        if not s:
+            return current
+        if s in ("1", "true", "yes"):
+            return True
+        if s in ("0", "false", "no"):
+            return False
+        return current
+
+    target.include_sent = _opt_bool(include_sent, target.include_sent)
+    target.include_bin = _opt_bool(include_bin, target.include_bin)
+    target.include_thread = _opt_bool(include_thread, target.include_thread)
+    save_jobs(jobs, path)
+    return json.dumps({"ok": True, "job": _job_row(target), "config": str(path)}, indent=2)
 
 
 def main() -> None:

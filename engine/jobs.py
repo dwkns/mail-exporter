@@ -26,6 +26,7 @@ _KNOWN_JOB_KEYS = {
     "match",
     "includeSent",
     "includeBin",
+    "includeThread",
 }
 
 _POINTER_REL = Path("Library/Application Support/MailExporter/jobs-location")
@@ -41,6 +42,7 @@ class Job:
     match: MatchSpec
     include_sent: bool = True
     include_bin: bool = False
+    include_thread: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -50,6 +52,7 @@ class Job:
             "outputDir": self.output_dir,
             "includeSent": self.include_sent,
             "includeBin": self.include_bin,
+            "includeThread": self.include_thread,
             "match": self.match.to_dict(),
         }
         for key, value in self.extra.items():
@@ -160,6 +163,7 @@ def parse_job(raw: dict[str, Any]) -> Job:
         match=match,
         include_sent=bool(raw.get("includeSent", True)),
         include_bin=bool(raw.get("includeBin", False)),
+        include_thread=bool(raw.get("includeThread", False)),
         extra=extra,
     )
 

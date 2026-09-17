@@ -52,12 +52,25 @@ class MailAccessError(RuntimeError):
 
 def find_mail_root() -> Path:
     saw_perm = False
-    for data in MAIL_DATA_CANDIDATES:
+    mail = Path.home() / "Library/Mail"
+    discovered: list[Path] = []
+    try:
+        if mail.is_dir():
+            discovered = sorted(
+                (p / "MailData" for p in mail.glob("V*") if p.is_dir()),
+                key=lambda p: p.parent.name,
+                reverse=True,
+            )
+    except PermissionError:
+        saw_perm = True
+    candidates = discovered + [c for c in MAIL_DATA_CANDIDATES if c not in discovered]
+    for data in candidates:
         try:
             if (data / "SyncedSmartMailboxes.plist").is_file() or (
                 data / "Envelope Index"
-            ).is_file():
-                return data.parent
+            ).is_file() or data.is_dir():
+                if data.is_dir():
+                    return data.parent
         except PermissionError:
             saw_perm = True
     if saw_perm:
@@ -87,8 +100,8 @@ def should_skip_path(
     return False
 
 
-def read_emlx_rfc822(path: Path) -> bytes:
-    raw = path.read_bytes()
+def read_emlx_rfc822(path: Path, *, max_bytes: int | None = None) -> bytes:
+    raw = path.read_bytes() if max_bytes is None else _read_emlx_capped(path, max_bytes)
     nl = raw.find(b"\n")
     if nl < 0:
         raise ValueError(f"invalid emlx: {path}")
@@ -97,7 +110,30 @@ def read_emlx_rfc822(path: Path) -> bytes:
     except ValueError as exc:
         raise ValueError(f"invalid emlx byte count: {path}") from exc
     start = nl + 1
-    return raw[start : start + nbytes]
+    body = raw[start : start + nbytes]
+    if max_bytes is not None:
+        return body[:max_bytes]
+    return body
+
+
+def _read_emlx_capped(path: Path, max_bytes: int) -> bytes:
+    with path.open("rb") as fh:
+        head = fh.read(64)
+        nl = head.find(b"\n")
+        if nl < 0:
+            extra = fh.read(64)
+            head += extra
+            nl = head.find(b"\n")
+        if nl < 0:
+            raise ValueError(f"invalid emlx: {path}")
+        try:
+            nbytes = int(head[:nl].strip())
+        except ValueError as exc:
+            raise ValueError(f"invalid emlx byte count: {path}") from exc
+        want = min(nbytes, max_bytes) + nl + 1
+        if len(head) >= want:
+            return head[:want]
+        return head + fh.read(want - len(head))
 
 
 def attachments_dir_for(emlx_path: Path) -> Path | None:

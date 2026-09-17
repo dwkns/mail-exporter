@@ -4,6 +4,7 @@ on:
   push:
     branches: [ "main" ]
     tags: [ "v*" ]
+  pull_request:
   workflow_dispatch:
     inputs:
       tag_name:
@@ -12,8 +13,30 @@ on:
         default: ''
 
 jobs:
+  test:
+    name: Pytest
+    if: github.event_name == 'pull_request'
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: pytest -q
+
   build:
     name: Build MailExporter macOS App
+    if: github.event_name != 'pull_request'
     runs-on: macos-14
     permissions:
       contents: write
