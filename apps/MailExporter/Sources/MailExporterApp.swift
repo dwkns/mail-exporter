@@ -19,6 +19,7 @@ struct MailExporterApp: App {
                 .environmentObject(store)
                 .environmentObject(prefs)
                 .frame(minWidth: 900, minHeight: 580)
+                .background(HiddenWindowTitle())
         }
         .defaultSize(width: 960, height: 640)
         // Claim file-open events so a Dock/Finder drop orders this window front.
@@ -60,6 +61,7 @@ struct MailExporterApp: App {
             PreferencesView()
                 .environmentObject(prefs)
                 .environmentObject(store)
+                .background(HiddenWindowTitle())
         }
         .windowResizability(.contentSize)
     }

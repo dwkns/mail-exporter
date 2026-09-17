@@ -96,7 +96,7 @@ struct RunView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text("Export")
+            Text("Mail Exporter")
                 .font(.title2.weight(.semibold))
             if busy {
                 Text(progressLabel)
@@ -106,31 +106,9 @@ struct RunView: View {
             }
             Spacer(minLength: 12)
             HeaderActionButton(
-                title: "New",
-                symbol: "plus",
-                tint: .blue,
-                style: .quiet,
-                enabled: !busy
-            ) {
-                editor = .add
-            }
-            .help("New export (⌘N)")
-            .accessibilityLabel("New export")
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
-    }
-
-    private var footer: some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            DraftDropZone()
-            Spacer(minLength: 12)
-            HeaderActionButton(
-                title: busy ? "Exporting…" : "Export",
+                title: busy ? "Exporting…" : "Export All",
                 symbol: "tray.and.arrow.down.fill",
                 tint: .accentColor,
-                style: .prominent,
                 enabled: !busy && hasExportableJob,
                 spinning: busy
             ) {
@@ -144,12 +122,29 @@ struct RunView: View {
             .accessibilityLabel(busy ? "Exporting" : "Export all")
         }
         .padding(.horizontal, 20)
-        .padding(.top, 12)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var footer: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            HeaderActionButton(
+                title: "New",
+                symbol: "plus",
+                tint: .blue,
+                enabled: !busy
+            ) {
+                editor = .add
+            }
+            .help("New export (⌘N)")
+            .accessibilityLabel("New export")
+
+            DraftDropZone()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
         .padding(.bottom, 16)
         .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .top) {
-            Divider()
-        }
     }
 
     private var emptyState: some View {
@@ -167,8 +162,7 @@ struct RunView: View {
             HeaderActionButton(
                 title: "New",
                 symbol: "plus",
-                tint: .blue,
-                style: .quiet
+                tint: .blue
             ) {
                 editor = .add
             }
@@ -220,6 +214,7 @@ struct RunView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
+                    .allowsHitTesting(false)
             )
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
@@ -563,111 +558,6 @@ struct RunView: View {
                 trigger: nil
             )
             center.add(req, withCompletionHandler: nil)
-        }
-    }
-}
-
-private struct JobGlyph: View {
-    let symbol: String
-    let tint: Color
-    var size: CGFloat = 36
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.42, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(
-                RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-                    .fill(tint.gradient)
-            )
-            .accessibilityHidden(true)
-    }
-}
-
-private struct HeaderActionButton: View {
-    enum Style {
-        case quiet
-        case prominent
-    }
-
-    let title: String
-    let symbol: String
-    let tint: Color
-    var style: Style = .quiet
-    var enabled: Bool = true
-    var spinning: Bool = false
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                ZStack {
-                    if spinning {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.72)
-                            .frame(width: 28, height: 28)
-                            .tint(style == .prominent ? Color.white : Color.secondary)
-                    } else if style == .prominent {
-                        Image(systemName: symbol)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Color.white.opacity(0.22))
-                            )
-                    } else {
-                        JobGlyph(symbol: symbol, tint: tint, size: 28)
-                    }
-                }
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(style == .prominent ? Color.white : Color.primary)
-            }
-            .padding(.leading, 5)
-            .padding(.trailing, 14)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(chipFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(
-                        style == .quiet
-                            ? Color(nsColor: .separatorColor).opacity(0.55)
-                            : Color.white.opacity(0.18),
-                        lineWidth: 1
-                    )
-                    .allowsHitTesting(false)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(hovering && enabled ? 0.10 : 0))
-                    .allowsHitTesting(false)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .opacity(enabled ? 1 : 0.42)
-        .disabled(!enabled)
-        .onHover { hovering = $0 }
-    }
-
-    private var chipFill: AnyShapeStyle {
-        switch style {
-        case .prominent:
-            return AnyShapeStyle(Color.accentColor.gradient)
-        case .quiet:
-            return AnyShapeStyle(
-                hovering
-                    ? Color.primary.opacity(0.06)
-                    : Color(nsColor: .controlBackgroundColor)
-            )
         }
     }
 }

@@ -236,6 +236,7 @@ fi
 echo "Compiling Swift UI…"
 swiftc \
   "${SRC}/MailExporterApp.swift" \
+  "${SRC}/AppChrome.swift" \
   "${SRC}/AppPreferences.swift" \
   "${SRC}/PreferencesView.swift" \
   "${SRC}/AppUpdater.swift" \

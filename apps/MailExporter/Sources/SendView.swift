@@ -18,15 +18,8 @@ struct DraftDropZone: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                dropZone
-                    .frame(width: 480, height: 96)
-
-                if !inbox.recentDrops.isEmpty {
-                    recentDropsPanel
-                        .frame(width: 196, height: 96)
-                }
-            }
+            dropZone
+                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: 120)
 
             if let lastResult = runner.lastResult {
                 VStack(alignment: .leading, spacing: 4) {
@@ -48,10 +41,10 @@ struct DraftDropZone: View {
                     }
                 }
                 .textSelection(.enabled)
-                .frame(maxWidth: 480, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(maxWidth: 692, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { runner.drainInbox() }
         .onChange(of: inbox.generation) { _ in runner.drainInbox() }
         .onChange(of: runner.busy) { isBusy in
@@ -86,49 +79,86 @@ struct DraftDropZone: View {
     }
 
     private var dropZone: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(
-                    isTargeted ? Color.accentColor : Color(nsColor: .separatorColor).opacity(0.55),
-                    style: StrokeStyle(lineWidth: isTargeted ? 2 : 1, dash: isTargeted ? [] : [7, 5])
-                )
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return ZStack {
+            shape.fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
 
-            HStack(spacing: 12) {
-                Image(systemName: "envelope.badge")
-                    .font(.system(size: 28, weight: .regular))
-                    .foregroundStyle(isTargeted ? Color.accentColor : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(runner.busy ? "Working…" : "Drop .md email files here")
-                        .font(.headline)
-                    Text("Opens an Apple Mail draft — never sends")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 6) {
-                    Button("Choose Files…") {
-                        chooseFiles()
-                    }
-                    .disabled(runner.busy)
-                    if runner.busy {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Opening drafts…")
-                                .foregroundStyle(.secondary)
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            shape
+                .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.55 : 0.18), lineWidth: 6)
+                .blur(radius: 5)
+                .offset(y: 2)
+                .mask(
+                    shape.fill(
+                        LinearGradient(
+                            colors: [.black, .clear],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.65)
+                        )
+                    )
+                )
+                .allowsHitTesting(false)
+
+            wellContent
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+            shape.strokeBorder(
+                isTargeted
+                    ? Color.accentColor
+                    : Color.primary.opacity(colorScheme == .dark ? 0.5 : 0.38),
+                style: StrokeStyle(lineWidth: 1.75, dash: [5, 4])
+            )
+            .allowsHitTesting(false)
         }
         .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
         }
+    }
+
+    private var wellContent: some View {
+        HStack(spacing: 14) {
+            dropMessageIcon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(runner.busy ? "Working…" : "Drop .md email files here")
+                    .font(.headline)
+                Text("Opens an Apple Mail draft — never sends")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                Button("Choose Files…") {
+                    chooseFiles()
+                }
+                .disabled(runner.busy)
+                if runner.busy {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Opening drafts…")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                }
+            }
+            if !inbox.recentDrops.isEmpty {
+                recentDropsPanel
+                    .frame(width: 196)
+            }
+        }
+    }
+
+    private var dropMessageIcon: some View {
+        ZStack(alignment: .top) {
+            Image(systemName: "envelope.fill")
+                .font(.system(size: 28, weight: .medium))
+            Image(systemName: "arrow.down")
+                .font(.system(size: 11, weight: .bold))
+                .offset(y: -10)
+        }
+        .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
+        .frame(width: 36, height: 40)
+        .accessibilityHidden(true)
     }
 
     private var dropWellFill: Color {
