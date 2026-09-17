@@ -187,23 +187,143 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Entitlements: always allow bundled PyInstaller helper.
-# Restricted capabilities (iCloud) require an App ID + provisioning profile.
-# Without a profile, launchd rejects the app ("can't be opened", error 163) even
-# when signed with Apple Development. Opt in via INCLUDE_ICLOUD_ENTITLEMENTS=1
-# once the App ID has iCloud and a matching .mobileprovision / Mac profile.
+# Entitlements: always allow the bundled PyInstaller helper.
+# Restricted iCloud keys need an App ID + Mac provisioning profile. Attaching
+# them without a profile makes launchd reject the app ("can't be opened", 163)
+# even when signed with Apple Development. Never attach iCloud on ad-hoc
+# (SIGN_IDENTITY=-) or CI without a profile.
 # Sign from a generated copy under build/ (gitignored). Never write back onto
-# the tracked MailExporter.entitlements — that re-dirties the tree after every
-# local build. Default signing uses the checked-in helper-only file; iCloud
-# keys are generated only when INCLUDE_ICLOUD_ENTITLEMENTS=1.
+# the tracked helper-only MailExporter.entitlements.
+HELPER_ENT="${ROOT}/MailExporter.entitlements"
 ENT_FILE="${ROOT}/build/MailExporter.entitlements"
-INCLUDE_ICLOUD="${INCLUDE_ICLOUD_ENTITLEMENTS:-0}"
-if [[ "${INCLUDE_ICLOUD}" == "1" && "${SIGN_IDENTITY}" != "-" ]]; then
-  cat > "${ENT_FILE}" <<'ENT'
+APP_ENT="${ROOT}/build/MailExporter-app.entitlements"
+PROVISION_EMBED=""
+
+find_mac_provision_profile() {
+  if [[ -n "${PROVISION_PROFILE:-}" && -f "${PROVISION_PROFILE}" ]]; then
+    printf '%s\n' "${PROVISION_PROFILE}"
+    return 0
+  fi
+  local f
+  for f in \
+    "${ROOT}/embedded.provisionprofile" \
+    "${ROOT}/MailExporter.provisionprofile"
+  do
+    if [[ -f "${f}" ]]; then
+      printf '%s\n' "${f}"
+      return 0
+    fi
+  done
+  local dir="${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
+  local best="" best_mtime=0 m
+  if [[ -d "${dir}" ]]; then
+    shopt -s nullglob
+    for f in "${dir}"/*.provisionprofile "${dir}"/*.mobileprovision; do
+      if security cms -D -i "${f}" 2>/dev/null | grep -q 'com.dwkns.MailExporter' \
+        && security cms -D -i "${f}" 2>/dev/null | grep -q 'iCloud.com.dwkns.MailExporter'; then
+        m="$(stat -f %m "${f}")"
+        if [[ "${m}" -gt "${best_mtime}" ]]; then
+          best="${f}"
+          best_mtime="${m}"
+        fi
+      fi
+    done
+    shopt -u nullglob
+  fi
+  if [[ -n "${best}" ]]; then
+    printf '%s\n' "${best}"
+    return 0
+  fi
+  return 1
+}
+
+this_mac_provisioning_udid() {
+  system_profiler SPHardwareDataType 2>/dev/null \
+    | awk -F': ' '/Provisioning UDID/{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}'
+}
+
+refresh_icloud_profile() {
+  local proj="${ROOT}/signing/MailExporter.xcodeproj"
+  if [[ ! -d "${proj}" ]]; then
+    return 1
+  fi
+  if [[ -n "${GITHUB_ACTIONS:-}" || -n "${CI:-}" ]]; then
+    return 1
+  fi
+  local dest="generic/platform=macOS"
+  local udid
+  udid="$(this_mac_provisioning_udid || true)"
+  if [[ -n "${udid}" ]]; then
+    dest="platform=macOS,arch=arm64,id=${udid}"
+  fi
+  echo "Creating/refreshing Mac iCloud provisioning profile (automatic signing, ${dest})…"
+  xcodebuild \
+    -project "${proj}" \
+    -scheme MailExporter \
+    -destination "${dest}" \
+    -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration \
+    -derivedDataPath "${ROOT}/signing/DerivedData" \
+    build >/tmp/mailexporter-icloud-profile.log 2>&1 || {
+      echo "warning: automatic signing did not produce a profile (see /tmp/mailexporter-icloud-profile.log)."
+      return 1
+    }
+  find_mac_provision_profile
+}
+
+IS_ADHOC=0
+if [[ "${SIGN_IDENTITY}" == "-" ]]; then
+  IS_ADHOC=1
+fi
+IS_CI=0
+if [[ -n "${GITHUB_ACTIONS:-}" || -n "${CI:-}" ]]; then
+  IS_CI=1
+fi
+
+PROFILE="$(find_mac_provision_profile || true)"
+if [[ -z "${PROFILE}" && "${IS_ADHOC}" == "0" && "${IS_CI}" == "0" ]]; then
+  PROFILE="$(refresh_icloud_profile || true)"
+fi
+
+# Local Apple Development / Developer ID ships with iCloud when a profile exists.
+# Explicit INCLUDE_ICLOUD_ENTITLEMENTS=0/1 wins. Ad-hoc and CI-without-profile stay helper-only.
+if [[ -z "${INCLUDE_ICLOUD_ENTITLEMENTS:-}" ]]; then
+  if [[ "${IS_ADHOC}" == "1" ]]; then
+    INCLUDE_ICLOUD=0
+  elif [[ "${IS_CI}" == "1" && -z "${PROFILE}" ]]; then
+    INCLUDE_ICLOUD=0
+  elif [[ -n "${PROFILE}" ]]; then
+    INCLUDE_ICLOUD=1
+  else
+    INCLUDE_ICLOUD=0
+  fi
+else
+  INCLUDE_ICLOUD="${INCLUDE_ICLOUD_ENTITLEMENTS}"
+fi
+
+if [[ "${INCLUDE_ICLOUD}" == "1" ]]; then
+  if [[ "${IS_ADHOC}" == "1" ]]; then
+    echo "error: refusing iCloud entitlements on ad-hoc signing (launchd 163). Unset INCLUDE_ICLOUD_ENTITLEMENTS." >&2
+    exit 1
+  fi
+  if [[ -z "${PROFILE}" ]]; then
+    echo "error: iCloud entitlements need a Mac provisioning profile for com.dwkns.MailExporter." >&2
+    echo "Add the Apple ID in Xcode → Settings → Accounts, or set PROVISION_PROFILE=." >&2
+    exit 1
+  fi
+  TEAM_ID="$(security cms -D -i "${PROFILE}" 2>/dev/null | plutil -extract TeamIdentifier.0 raw -o - -- - 2>/dev/null || true)"
+  if [[ -z "${TEAM_ID}" ]]; then
+    TEAM_ID="LD2427W529"
+  fi
+  cat > "${ENT_FILE}" <<ENT
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>com.apple.application-identifier</key>
+  <string>${TEAM_ID}.com.dwkns.MailExporter</string>
+  <key>com.apple.developer.team-identifier</key>
+  <string>${TEAM_ID}</string>
   <key>com.apple.developer.icloud-container-identifiers</key>
   <array>
     <string>iCloud.com.dwkns.MailExporter</string>
@@ -223,13 +343,18 @@ if [[ "${INCLUDE_ICLOUD}" == "1" && "${SIGN_IDENTITY}" != "-" ]]; then
 </dict>
 </plist>
 ENT
-  echo "Developer signing with iCloud entitlements (INCLUDE_ICLOUD_ENTITLEMENTS=1)."
+  cp "${ENT_FILE}" "${APP_ENT}"
+  PROVISION_EMBED="${PROFILE}"
+  echo "Developer signing with iCloud entitlements + profile $(basename "${PROFILE}")."
 else
-  cp "${ROOT}/MailExporter.entitlements" "${ENT_FILE}"
-  if [[ "${SIGN_IDENTITY}" == "-" ]]; then
-    echo "Ad-hoc signing: omitting iCloud entitlements (jobs.json uses local Application Support)."
+  cp "${HELPER_ENT}" "${ENT_FILE}"
+  cp "${HELPER_ENT}" "${APP_ENT}"
+  if [[ "${IS_ADHOC}" == "1" ]]; then
+    echo "Ad-hoc signing: omitting iCloud entitlements (no profile; avoids launchd 163)."
+  elif [[ "${IS_CI}" == "1" ]]; then
+    echo "CI signing without iCloud entitlements (no Mac provisioning profile)."
   else
-    echo "Developer signing without iCloud entitlements (set INCLUDE_ICLOUD_ENTITLEMENTS=1 when App ID + profile are ready)."
+    echo "Developer signing without iCloud entitlements (no Mac profile for iCloud.com.dwkns.MailExporter)."
   fi
 fi
 
@@ -299,6 +424,10 @@ chmod +x "${HELPER_DIR}/bin/rg"
 echo "Signing…"
 HELPER_ENGINE="${HELPER_DIR}/MailExporterEngine"
 ENT="${ROOT}/build/MailExporter.entitlements"
+if [[ -n "${PROVISION_EMBED}" ]]; then
+  cp "${PROVISION_EMBED}" "${APP}/Contents/embedded.provisionprofile"
+  echo "Embedded provisioning profile → Contents/embedded.provisionprofile"
+fi
 
 PY_VER="$("${VENV}/bin/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 PY_DIR="python${PY_VER}"
@@ -322,29 +451,31 @@ PLIST
 fi
 
 while IFS= read -r -d '' f; do
-  codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" "$f" || true
+  codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${HELPER_ENT}" "$f" || true
 done < <(find "${HELPER_ENGINE}" -type f \( -name '*.so' -o -name '*.dylib' -o -name 'Python' -o -name 'MailExporterEngine' \) -print0)
 
 if [[ -d "${HELPER_ENGINE}/_internal/${PY_DIR}" ]]; then
-  codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" \
+  codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${HELPER_ENT}" \
     "${HELPER_ENGINE}/_internal/${PY_DIR}" || true
 fi
 if [[ -d "${HELPER_ENGINE}/_internal/Python.framework" ]]; then
   if [[ -d "${HELPER_ENGINE}/_internal/Python.framework/Versions/${PY_VER}" ]]; then
-    codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" \
+    codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${HELPER_ENT}" \
       "${HELPER_ENGINE}/_internal/Python.framework/Versions/${PY_VER}" || true
   fi
-  codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" \
+  codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${HELPER_ENT}" \
     "${HELPER_ENGINE}/_internal/Python.framework" || true
 fi
-codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" \
+codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${HELPER_ENT}" \
   "${HELPER_ENGINE}/MailExporterEngine"
 codesign --force --sign "${SIGN_IDENTITY}" \
   "${HELPER_DIR}/bin/rg"
-codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" \
-  "${BIN}"
-codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${ENT}" \
-  "${APP}"
+APP_SIGN_FLAGS=(--force --sign "${SIGN_IDENTITY}" --entitlements "${APP_ENT}")
+if [[ -n "${PROVISION_EMBED}" ]]; then
+  APP_SIGN_FLAGS+=(--generate-entitlement-der)
+fi
+codesign "${APP_SIGN_FLAGS[@]}" "${BIN}"
+codesign "${APP_SIGN_FLAGS[@]}" "${APP}"
 
 codesign --verify --verbose=2 "${APP}" 2>&1 | tail -12 || true
 

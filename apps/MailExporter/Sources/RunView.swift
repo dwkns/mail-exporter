@@ -326,13 +326,6 @@ struct RunView: View {
     }
 
     private func run(jobID: String?) {
-        let moved = store.detectMovedTargetFolders(jobID: jobID)
-        if !moved.isEmpty {
-            for m in moved {
-                notify("Moved folder detected for “\(m.job.name)”: updated to \(m.newPath)")
-            }
-        }
-
         let requested = (jobID != nil) ? store.jobs.filter { $0.id == jobID } : store.jobs
         var targetJobs: [ExportJob] = []
         for job in requested {

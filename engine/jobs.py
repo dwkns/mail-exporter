@@ -19,6 +19,19 @@ SAMPLE_TERMS = [
     "subscription",
 ]
 
+_KNOWN_JOB_KEYS = {
+    "id",
+    "name",
+    "outputDir",
+    "match",
+    "includeSent",
+    "includeBin",
+}
+
+_POINTER_REL = Path("Library/Application Support/MailExporter/jobs-location")
+_PREFS_REL = Path("Library/Preferences/com.dwkns.MailExporter.plist")
+_LOCAL_JOBS_REL = Path("Library/Application Support/MailExporter/jobs.json")
+
 
 @dataclass
 class Job:
@@ -28,9 +41,10 @@ class Job:
     match: MatchSpec
     include_sent: bool = True
     include_bin: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "outputDir": self.output_dir,
@@ -38,6 +52,10 @@ class Job:
             "includeBin": self.include_bin,
             "match": self.match.to_dict(),
         }
+        for key, value in self.extra.items():
+            if key not in data:
+                data[key] = value
+        return data
 
 
 @dataclass
@@ -48,39 +66,83 @@ class JobsFile:
         return {"jobs": [j.to_dict() for j in self.jobs]}
 
 
-def default_jobs_path() -> Path:
-    """Resolve jobs.json with the same priority as the macOS app.
+def _ubiquity_jobs_candidates(home: Path) -> list[Path]:
+    """On-disk names Apple uses for iCloud.com.dwkns.MailExporter."""
+    mobile = home / "Library/Mobile Documents"
+    return [
+        mobile / "iCloud.com~dwkns~MailExporter/Documents/jobs.json",
+        mobile / "iCloud~com~dwkns~MailExporter/Documents/jobs.json",
+    ]
 
-    Prefer the private iCloud ubiquity container (not the visible Drive folder),
-    then legacy CloudDocs, then local Application Support.
+
+def _read_pointer(home: Path) -> Path | None:
+    pointer = home / _POINTER_REL
+    if not pointer.is_file():
+        return None
+    raw = pointer.read_text(encoding="utf-8").strip()
+    if not raw:
+        return None
+    line = raw.splitlines()[0].strip()
+    if not line or line.startswith("#"):
+        return None
+    path = Path(line).expanduser()
+    if path.is_dir() or path.suffix.lower() != ".json":
+        path = path / "jobs.json"
+    return path
+
+
+def _app_storage_preference(home: Path) -> tuple[str | None, str]:
+    """Return (storageLocation, customStoragePath) from the Mac app's defaults."""
+    plist_path = home / _PREFS_REL
+    if not plist_path.is_file():
+        return None, ""
+    try:
+        import plistlib
+
+        data = plistlib.loads(plist_path.read_bytes())
+    except Exception:
+        return None, ""
+    if not isinstance(data, dict):
+        return None, ""
+    loc = data.get("storageLocation")
+    custom = data.get("customStoragePath") or ""
+    loc_s = str(loc).strip().lower() if loc else None
+    return loc_s, str(custom).strip()
+
+
+def default_jobs_path() -> Path:
+    """Resolve jobs.json the same way the macOS app does.
+
+    1. ``MAILEXPORTER_CONFIG``
+    2. Pointer written by the app (``…/MailExporter/jobs-location``)
+    3. App Settings (UserDefaults): custom / local / iCloud
+    4. Existing private ubiquity ``jobs.json`` (either on-disk name)
+    5. Local Application Support
+
+    Leftover iCloud Drive (CloudDocs) files are never preferred over Local.
     """
     env = os.environ.get("MAILEXPORTER_CONFIG")
     if env:
         return Path(env).expanduser()
 
     home = Path.home()
-    # On-disk layout for container id iCloud.com.dwkns.MailExporter
-    ubiquity_path = (
-        home
-        / "Library/Mobile Documents/iCloud.com~dwkns~MailExporter/Documents/jobs.json"
-    )
-    if ubiquity_path.is_file():
-        return ubiquity_path
+    pointed = _read_pointer(home)
+    if pointed is not None:
+        return pointed
 
-    legacy_clouddocs = (
-        home / "Library/Mobile Documents/com~apple~CloudDocs/MailExporter/jobs.json"
-    )
-    if legacy_clouddocs.is_file():
-        return legacy_clouddocs
+    loc, custom = _app_storage_preference(home)
+    if loc == "custom" and custom:
+        path = Path(custom).expanduser()
+        if path.is_dir() or path.suffix.lower() != ".json":
+            path = path / "jobs.json"
+        return path
+    if loc == "local":
+        return home / _LOCAL_JOBS_REL
 
-    local_path = home / "Library/Application Support/MailExporter/jobs.json"
-    if local_path.is_file():
-        return local_path
-
-    # Prefer ubiquity container when its parent exists (app has provisioned it).
-    if ubiquity_path.parent.is_dir() or ubiquity_path.parent.parent.is_dir():
-        return ubiquity_path
-    return local_path
+    for ubi in _ubiquity_jobs_candidates(home):
+        if ubi.is_file():
+            return ubi
+    return home / _LOCAL_JOBS_REL
 
 
 def parse_job(raw: dict[str, Any]) -> Job:
@@ -90,6 +152,7 @@ def parse_job(raw: dict[str, Any]) -> Job:
     if not output:
         raise ValueError(f"job {name!r}: outputDir required")
     match = parse_match(raw.get("match") if isinstance(raw.get("match"), dict) else None)
+    extra = {k: v for k, v in raw.items() if k not in _KNOWN_JOB_KEYS}
     return Job(
         id=jid,
         name=name,
@@ -97,6 +160,7 @@ def parse_job(raw: dict[str, Any]) -> Job:
         match=match,
         include_sent=bool(raw.get("includeSent", True)),
         include_bin=bool(raw.get("includeBin", False)),
+        extra=extra,
     )
 
 

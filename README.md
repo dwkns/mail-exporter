@@ -39,11 +39,13 @@ The build produces a self-contained app: Swift UI plus a bundled `MailExporterEn
 
 - **Export** — one pane: job list (scrolls) plus an always-visible drop zone at the bottom. Add/Edit open a sheet. Drop Markdown to open an Apple Mail **draft** (never sends).
 
-Jobs are stored at:
+Jobs are stored in the private iCloud container `iCloud.com.dwkns.MailExporter` when this Mac’s signed build has the iCloud entitlement. Otherwise they stay at:
 
 ```text
 ~/Library/Application Support/MailExporter/jobs.json
 ```
+
+CLI and MCP follow the same file the app last wrote (pointer at `~/Library/Application Support/MailExporter/jobs-location`).
 
 Each export folder looks like this (MailExporter creates `Drafts/` and `Sent/`):
 
