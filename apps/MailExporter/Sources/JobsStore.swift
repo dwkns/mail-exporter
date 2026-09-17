@@ -1052,7 +1052,7 @@ final class JobsStore: ObservableObject {
     """
 
     func createProject(named name: String, parent: String) throws -> ExportJob {
-        if isForbiddenOutputDir(parent) {
+        if Self.isForbiddenOutputDir(parent) {
             throw NSError(
                 domain: "MailExporter",
                 code: 1,
