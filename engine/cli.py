@@ -288,7 +288,7 @@ def add_common_subcommands(sub: argparse._SubParsersAction) -> None:
 
     p_ht = sub.add_parser(
         "write-howto",
-        help="Rewrite _how_to_use.md in every export folder (or one job)",
+        help="Rewrite how_to_use.md in every project folder (or one job)",
     )
     p_ht.add_argument("--job-id", help="One job by id")
     p_ht.add_argument("--job-name", help="One job by name")

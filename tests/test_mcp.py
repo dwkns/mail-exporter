@@ -139,7 +139,7 @@ def test_mcp_clear_target_requires_markers(
 
     (out / ".exported-ids.json").write_text('{"ids":[]}', encoding="utf-8")
     with patch("mailexporter_mcp.write_how_to") as wh:
-        wh.return_value = out / "_how_to_use.md"
+        wh.return_value = out / "how_to_use.md"
         ok = json.loads(m.clear_target(job_name="DHL"))
     assert ok.get("ok") is True
     assert ok["removedEml"] == 1
@@ -232,7 +232,7 @@ def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
         "mailexporter_mcp.write_how_to"
     ) as wh:
         run.return_value = ({"ok": True, "results": [{"matchCount": 3}]}, 0)
-        wh.return_value = out / "_how_to_use.md"
+        wh.return_value = out / "how_to_use.md"
         data = json.loads(m.export_job(job_name="DHL"))
         dry = json.loads(m.check_matches(job_name="DHL"))
         nulls = json.loads(m.export_job(job_name="DHL", job_id=None, force_full=None))

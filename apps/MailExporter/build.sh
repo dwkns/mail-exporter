@@ -410,8 +410,8 @@ if [[ -f "${ROOT}/Resources/AppIcon.icns" ]]; then
   cp "${ROOT}/Resources/AppIcon.icns" "${HELPER_DIR}/AppIcon.icns"
 fi
 
-if [[ -f "${ROOT}/Resources/_how_to_use.md" ]]; then
-  cp "${ROOT}/Resources/_how_to_use.md" "${HELPER_DIR}/_how_to_use.md"
+if [[ -f "${ROOT}/Resources/how_to_use.md" ]]; then
+  cp "${ROOT}/Resources/how_to_use.md" "${HELPER_DIR}/how_to_use.md"
 fi
 
 if [[ -f "${ROOT}/Resources/MakeMailDraft.applescript" ]]; then

@@ -18,5 +18,5 @@ Enable **only MailExporter** in System Settings → Privacy & Security → Full 
 One **Export** pane. Empty title bar (traffic lights stay). In-pane heading **Mail Exporter** with the app icon.
 
 - Job list (scrolls if needed) with **Export** plus an ellipsis for **Edit** and **Show in Finder**
-- Header **+** opens New Export; **Export All** is the primary action
+- Header **+** opens New Project; **Export All** is the primary action
 - Always-visible drop zone at the bottom: Markdown → Apple Mail draft (never sends)

@@ -161,33 +161,44 @@ def parse_markdown_draft(text: str, *, source_path: Path | None = None) -> Draft
 
 
 def resolve_attachments(spec: DraftSpec) -> list[Path]:
-    """Resolve Attach: paths relative to the .md file (no ``..``).
+    """Resolve Attach: paths that stay inside the project folder.
 
-    Missing files are skipped (Mail still opens the draft and reports them).
-    Absolute paths, ``~/…``, and ``..`` raise ValueError.
+    Relative paths are tried from the project root (``Documents/a.pdf``) then
+    from the ``.md`` folder. Absolute / ``~/`` paths are allowed only when they
+    resolve under the project. Missing files inside the project are skipped.
     """
-    base = (spec.source_path.parent if spec.source_path else Path.cwd()).resolve()
+    from engine.project import infer_project_root
+
+    md_dir = (spec.source_path.parent if spec.source_path else Path.cwd()).resolve()
+    project = (
+        infer_project_root(spec.source_path).resolve()
+        if spec.source_path
+        else md_dir
+    )
     out: list[Path] = []
     denied: list[str] = []
     for raw in spec.attach:
         expanded = Path(raw).expanduser()
         if expanded.is_absolute() or raw.startswith("~"):
+            candidates = [expanded.expanduser().resolve()]
+        else:
+            candidates = [(project / expanded).resolve(), (md_dir / expanded).resolve()]
+        inside: list[Path] = []
+        for p in candidates:
+            try:
+                p.relative_to(project)
+            except ValueError:
+                continue
+            inside.append(p)
+        if not inside:
             denied.append(raw)
             continue
-        if ".." in Path(raw).parts:
-            denied.append(raw)
-            continue
-        p = (base / expanded).resolve()
-        try:
-            p.relative_to(base)
-        except ValueError:
-            denied.append(raw)
-            continue
-        if p.is_file():
-            out.append(p)
+        existing = [p for p in inside if p.is_file()]
+        if existing:
+            out.append(existing[0])
     if denied:
         raise ValueError(
-            "attachment path(s) must be relative (no absolute or ~/…): "
+            "attachment path(s) must stay inside the project folder: "
             + ", ".join(denied)
         )
     return out

@@ -134,7 +134,7 @@ def test_attach_preserves_quoted_commas(tmp_path: Path) -> None:
     assert resolve_attachments(spec) == [odd.resolve(), (tmp_path / "other.txt").resolve()]
 
 
-def test_resolve_attachments_absolute_denied(tmp_path: Path) -> None:
+def test_resolve_attachments_absolute_inside_project(tmp_path: Path) -> None:
     f = tmp_path / "abs.txt"
     f.write_text("x", encoding="utf-8")
     md = tmp_path / "d.md"
@@ -142,35 +142,53 @@ def test_resolve_attachments_absolute_denied(tmp_path: Path) -> None:
     from engine.draft_md import DraftSpec
 
     spec = DraftSpec(attach=[str(f)], source_path=md)
-    with pytest.raises(ValueError, match="relative"):
+    assert resolve_attachments(spec) == [f.resolve()]
+
+
+def test_resolve_attachments_outside_project_denied(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    drafts.mkdir(parents=True)
+    outside = tmp_path / "other" / "secret.txt"
+    outside.parent.mkdir()
+    outside.write_text("x", encoding="utf-8")
+    md = drafts / "d.md"
+    md.write_text("y", encoding="utf-8")
+    from engine.draft_md import DraftSpec
+
+    spec = DraftSpec(attach=[str(outside)], source_path=md)
+    with pytest.raises(ValueError, match="project"):
         resolve_attachments(spec)
 
 
 def test_resolve_attachments_tilde_denied(tmp_path: Path) -> None:
-    md = tmp_path / "d.md"
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "d.md"
     md.write_text("y", encoding="utf-8")
     from engine.draft_md import DraftSpec
 
     spec = DraftSpec(attach=["~/secret.txt"], source_path=md)
-    with pytest.raises(ValueError, match="relative"):
+    with pytest.raises(ValueError, match="project"):
         resolve_attachments(spec)
 
 
-def test_resolve_attachments_parent_relative_denied(tmp_path: Path) -> None:
-    drafts = tmp_path / "Email" / "Drafts"
-    source = tmp_path / "_source_files"
+def test_resolve_attachments_documents_from_project_root(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    docs = project / "Documents"
     drafts.mkdir(parents=True)
-    source.mkdir()
-    (source / "scan.pdf").write_bytes(b"%PDF")
+    docs.mkdir()
+    pdf = docs / "scan.pdf"
+    pdf.write_bytes(b"%PDF")
     md = drafts / "d.md"
     md.write_text(
-        "---\nTo: a@b.com\nSubject: x\n"
-        "Attach: ../../_source_files/scan.pdf\n---\n\nbody\n",
+        "---\nTo: a@b.com\nSubject: x\nAttach: Documents/scan.pdf\n---\n\nbody\n",
         encoding="utf-8",
     )
     spec = parse_markdown_draft(md.read_text(encoding="utf-8"), source_path=md)
-    with pytest.raises(ValueError, match="relative"):
-        resolve_attachments(spec)
+    assert resolve_attachments(spec) == [pdf.resolve()]
 
 
 def test_split_addrs_preserves_quoted_commas() -> None:

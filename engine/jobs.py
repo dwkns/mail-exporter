@@ -23,6 +23,7 @@ _KNOWN_JOB_KEYS = {
     "id",
     "name",
     "outputDir",
+    "projectDir",
     "match",
     "includeSent",
     "includeBin",
@@ -43,6 +44,7 @@ class Job:
     include_sent: bool = True
     include_bin: bool = False
     include_thread: bool = False
+    project_dir: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +57,8 @@ class Job:
             "includeThread": self.include_thread,
             "match": self.match.to_dict(),
         }
+        if self.project_dir:
+            data["projectDir"] = self.project_dir
         for key, value in self.extra.items():
             if key not in data:
                 data[key] = value
@@ -164,6 +168,7 @@ def parse_job(raw: dict[str, Any]) -> Job:
         include_sent=bool(raw.get("includeSent", True)),
         include_bin=bool(raw.get("includeBin", False)),
         include_thread=bool(raw.get("includeThread", False)),
+        project_dir=str(raw.get("projectDir") or "").strip(),
         extra=extra,
     )
 
