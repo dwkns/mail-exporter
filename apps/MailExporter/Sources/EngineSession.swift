@@ -14,7 +14,8 @@ final class EngineSession {
 
     func prewarm() {
         queue.async { [weak self] in
-            try? self?.ensureStarted()
+            guard let self else { return }
+            try? self.ensureStarted()
         }
     }
 

@@ -487,8 +487,9 @@ final class JobsStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleUbiquityIdentityChange()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.handleUbiquityIdentityChange()
             }
         }
     }
@@ -504,8 +505,9 @@ final class JobsStore: ObservableObject {
     private func startWatchingJobsFile() {
         let url = configURL
         cloudWatch.start(url: url) { [weak self] in
-            Task { @MainActor in
-                self?.reloadIfExternalChange()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.reloadIfExternalChange()
             }
         }
     }
