@@ -65,7 +65,16 @@ python3 -m engine seed          # example jobs (edit From addresses before a rea
 python3 -m engine list
 python3 -m engine export --dry-run --job-name DHL
 python3 -m engine export --job-name DHL
+python3 -m engine append-draft Drafts/001_who_subject.md   # Mail draft only — never sends
 ```
+
+From the **installed app** (no Python, what Cursor/Claude should run when you say “send it”):
+
+```bash
+/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft /absolute/path/to/Drafts/001_who_subject.md
+```
+
+That opens an Apple Mail **draft**. It never sends. `draft` is an alias for `append-draft`.
 
 `--force-full` wipes existing `.eml` files for that job and re-exports.
 

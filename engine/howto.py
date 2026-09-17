@@ -134,13 +134,24 @@ Best regards
 | `Attach` | Paths relative to the `.md` file’s folder. `../…` is allowed; `~/…` and absolute paths are not. |
 | `Format: plain` | Skip Markdown rendering. |
 
-### How to open the draft
+### How to open the draft (when the owner says “send it”)
 
-1. **MailExporter** — drop the `.md` file(s) on the Export pane drop target (or Choose Files…).
+MailExporter **never sends**. “Send it”, “put it in Mail”, or “open a draft” means: create an **Apple Mail draft** from the `.md` and leave sending to the owner.
+
+**Exact command** (installed app helper — works from Cursor / Claude with no GUI drop zone):
+
+```bash
+/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft "{drafts}/NNN_who_subject.md"
+```
+
+Use an absolute path to the Markdown file. Same command as `draft` instead of `append-draft`. Dev checkout: `python3 -m engine append-draft path.md`.
+
+Other ways (same result, still never send):
+
+1. **MailExporter** — drop the `.md` on the Export pane (or Choose Files).
 2. **MCP** — `compose_draft` with `path` to the `.md` (or inline `markdown`).
-3. **CLI** — `python -m engine append-draft path.md`
 
-Neither path sends mail. Drafts open via **AppleScript** (native Mail reply quote; **GUI Attach Files** for reply + attachments).
+Drafts open via **AppleScript** (native Mail reply quote; **GUI Attach Files** for reply + attachments).
 
 ### Attachments
 
@@ -191,7 +202,7 @@ Typical admin flow:
 1. `export_job` if mail looks stale.
 2. `list_messages` → `read_message` for context; keep the `messageId`.
 3. Write `{drafts}/NNN_who_subject.md` with `In-Reply-To: <messageId>`.
-4. `compose_draft` (or drop onto the Export pane).
+4. Open a Mail draft (never send): `/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft {drafts}/NNN_who_subject.md`
 5. After the owner sends: `export_job` again, match the new `.eml`, move the `.md` to `{sent}`.
 
 ## Ground rules

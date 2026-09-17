@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import sys
 
 import pytest
 
-from engine.compose_draft import compose_draft, compose_markdown_text
+from engine.compose_draft import applescript_path, compose_draft, compose_markdown_text
 
 
 @pytest.fixture
@@ -127,3 +128,20 @@ def test_compose_markdown_text_writes_temp_and_routes(tmp_path: Path) -> None:
     path_arg = cd.call_args[0][0]
     assert path_arg.suffix == ".md"
     assert not path_arg.exists()  # cleaned up in finally
+
+
+def test_applescript_path_from_installed_engine_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    resources = tmp_path / "MailExporter.app" / "Contents" / "Resources"
+    engine_dir = resources / "MailExporterEngine"
+    engine_dir.mkdir(parents=True)
+    script = resources / "MakeMailDraft.applescript"
+    script.write_text("-- stub\n", encoding="utf-8")
+    exe = engine_dir / "MailExporterEngine"
+    exe.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(
+        "engine.compose_draft.INSTALLED_APP_SCRIPT",
+        tmp_path / "not-installed.applescript",
+    )
+    assert applescript_path() == script

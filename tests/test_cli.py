@@ -63,3 +63,15 @@ def test_append_draft_cli_failure(tmp_path: Path, capsys) -> None:
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
+
+
+def test_draft_alias_matches_append_draft(tmp_path: Path, capsys) -> None:
+    md = tmp_path / "d.md"
+    md.write_text("---\nTo: a@b.com\nSubject: Hi\n---\n\nHello\n", encoding="utf-8")
+    with patch("engine.cli.compose_draft") as compose:
+        compose.return_value = {"ok": True, "via": "mail", "path": str(md)}
+        code = main(["draft", str(md)])
+    assert code == 0
+    compose.assert_called_once()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True

@@ -1,29 +1,61 @@
-"""Compose Mail drafts via AppleScript (Make Mail Draft)."""
+"""Compose Mail drafts via AppleScript (Make Mail Draft). Never sends."""
 
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 from engine.draft_md import parse_markdown_draft, resolve_attachments
+
+INSTALLED_APP_SCRIPT = Path(
+    "/Applications/MailExporter.app/Contents/Resources/MakeMailDraft.applescript"
+)
+INSTALLED_ENGINE = Path(
+    "/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine"
+)
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _frozen_script_candidates() -> list[Path]:
+    """AppleScript next to the bundled MailExporterEngine (installed .app)."""
+    found: list[Path] = []
+    if not getattr(sys, "frozen", False):
+        return found
+    exe = Path(sys.executable).resolve()
+    found.append(exe.parent.parent / "MakeMailDraft.applescript")
+    found.append(exe.parent / "MakeMailDraft.applescript")
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        base = Path(meipass)
+        found.append(base / "MakeMailDraft.applescript")
+        found.append(base.parent / "MakeMailDraft.applescript")
+    for parent in exe.parents:
+        if parent.name == "Resources":
+            found.append(parent / "MakeMailDraft.applescript")
+            break
+        if parent.suffix == ".app":
+            found.append(parent / "Contents/Resources/MakeMailDraft.applescript")
+            break
+    return found
+
+
 def applescript_path() -> Path | None:
-    bundled = (
+    candidates = [
+        *_frozen_script_candidates(),
+        INSTALLED_APP_SCRIPT,
         _repo_root()
-        / "apps/MailExporter/MailExporter.app/Contents/Resources/MakeMailDraft.applescript"
-    )
-    src = _repo_root() / "apps/MailExporter/Resources/MakeMailDraft.applescript"
-    if bundled.is_file():
-        return bundled
-    if src.is_file():
-        return src
+        / "apps/MailExporter/MailExporter.app/Contents/Resources/MakeMailDraft.applescript",
+        _repo_root() / "apps/MailExporter/Resources/MakeMailDraft.applescript",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
     return None
 
 
