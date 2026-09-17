@@ -114,8 +114,8 @@ struct RunView: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 28, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 8.6, style: .continuous))
                 .accessibilityHidden(true)
             Text("Mail Exporter")
                 .font(.title2.weight(.semibold))
@@ -761,9 +761,6 @@ private struct ExportJobRow: View {
                     Button("Edit", action: onEdit)
                     if folderStatus.isValidForExport {
                         Button("Show in Finder", action: onShowInFinder)
-                        Button("Open in Cursor") {
-                            CursorLauncher.openFolder(job.outputDir)
-                        }
                     } else {
                         Button("Choose Folder…", action: onChooseFolder)
                     }
@@ -778,14 +775,7 @@ private struct ExportJobRow: View {
                 .help("Edit and more")
                 .accessibilityLabel("More")
 
-                if folderStatus.isValidForExport {
-                    Button(action: onShowInFinder) {
-                        Label("Show in Finder", systemImage: "folder")
-                            .labelStyle(.leadingIcon)
-                    }
-                    .accessibilityLabel("Show in Finder")
-                    .help("Reveal the export folder in Finder")
-                } else {
+                if !folderStatus.isValidForExport {
                     Button(action: onChooseFolder) {
                         Label("Choose Folder…", systemImage: "folder")
                             .labelStyle(.leadingIcon)
