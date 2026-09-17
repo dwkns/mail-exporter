@@ -127,11 +127,16 @@ struct DraftDropZone: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                Button(action: chooseFiles) {
-                    Label("Choose Files…", systemImage: "doc")
-                        .labelStyle(.trailingIcon)
+                HeaderActionButton(
+                    title: "Choose Files",
+                    symbol: "doc",
+                    style: .secondary,
+                    enabled: !runner.busy
+                ) {
+                    chooseFiles()
                 }
-                .disabled(runner.busy)
+                .help("Choose Markdown email files")
+                .accessibilityLabel("Choose Files")
                 if runner.busy {
                     HStack(spacing: 6) {
                         ProgressView()

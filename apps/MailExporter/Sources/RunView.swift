@@ -108,7 +108,6 @@ struct RunView: View {
             HeaderActionButton(
                 title: busy ? "Exporting…" : "Export All",
                 symbol: "tray.and.arrow.down.fill",
-                tint: .accentColor,
                 enabled: !busy && hasExportableJob,
                 spinning: busy
             ) {
@@ -129,9 +128,8 @@ struct RunView: View {
     private var footer: some View {
         VStack(alignment: .trailing, spacing: 10) {
             HeaderActionButton(
-                title: "New",
+                title: "New Export",
                 symbol: "plus",
-                tint: .blue,
                 enabled: !busy
             ) {
                 editor = .add
@@ -160,9 +158,8 @@ struct RunView: View {
                     .frame(maxWidth: 360)
             }
             HeaderActionButton(
-                title: "New",
-                symbol: "plus",
-                tint: .blue
+                title: "New Export",
+                symbol: "plus"
             ) {
                 editor = .add
             }
