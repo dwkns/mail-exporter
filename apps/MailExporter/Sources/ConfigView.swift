@@ -247,7 +247,8 @@ struct SmartMailboxEditor: View {
                 TextField("Choose a folder", text: $job.outputDir)
                     .textFieldStyle(.roundedBorder)
                 Button(action: onBrowse) {
-                    Text("Choose…")
+                    Label("Choose…", systemImage: "folder")
+                        .labelStyle(.trailingIcon)
                 }
             }
 
@@ -321,6 +322,7 @@ struct SmartMailboxEditor: View {
                     job.groups.append(MatchGroup(conjunction: "any"))
                 } label: {
                     Label("Add Group", systemImage: "plus")
+                        .labelStyle(.trailingIcon)
                 }
                 .buttonStyle(.borderless)
             }

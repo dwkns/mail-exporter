@@ -96,8 +96,16 @@ def main() -> int:
     p_ex.add_argument("--force-full", action="store_true")
     p_ex.add_argument("--bench", action="store_true")
     p_ex.add_argument("--no-rg", action="store_true")
-    p_ad = sub.add_parser("append-draft")
+    p_ad = sub.add_parser(
+        "append-draft",
+        help="Open an Apple Mail draft from Markdown (never sends)",
+    )
     p_ad.add_argument("markdown", nargs="+")
+    p_draft = sub.add_parser(
+        "draft",
+        help="Alias for append-draft (never sends)",
+    )
+    p_draft.add_argument("markdown", nargs="+")
     ns = parser.parse_args(argv)
     ns.config = config
 
@@ -113,7 +121,7 @@ def main() -> int:
         from mailexporter_mcp import main as mcp_main
         mcp_main()
         return 0
-    if ns.cmd == "append-draft":
+    if ns.cmd in ("append-draft", "draft"):
         return cmd_append_draft(ns)
 
     if ns.cmd == "export":

@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct DraftDropZone: View {
     @ObservedObject private var inbox = ComposeInbox.shared
     @ObservedObject private var runner = ComposeRunner.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isTargeted = false
 
     private static let timeFormatter: DateFormatter = {
@@ -17,17 +18,8 @@ struct DraftDropZone: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                dropZone
-                    .frame(minHeight: 88)
-                    .frame(maxWidth: .infinity, maxHeight: 120)
-
-                if !inbox.recentDrops.isEmpty {
-                    recentDropsPanel
-                        .frame(width: 220)
-                        .frame(maxHeight: 120)
-                }
-            }
+            dropZone
+                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: 120)
 
             if let lastResult = runner.lastResult {
                 VStack(alignment: .leading, spacing: 4) {
@@ -51,28 +43,8 @@ struct DraftDropZone: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            HStack {
-                Button("Choose Files…") {
-                    chooseFiles()
-                }
-                .disabled(runner.busy)
-                Spacer()
-                if runner.busy {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Opening drafts…")
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .top) {
-            Divider()
-        }
         .onAppear { runner.drainInbox() }
         .onChange(of: inbox.generation) { _ in runner.drainInbox() }
         .onChange(of: runner.busy) { isBusy in
@@ -103,40 +75,100 @@ struct DraftDropZone: View {
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var dropZone: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isTargeted
-                    ? Color.accentColor.opacity(0.12)
-                    : Color(nsColor: .controlBackgroundColor))
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(
-                    isTargeted ? Color.accentColor : Color(nsColor: .separatorColor),
-                    style: StrokeStyle(lineWidth: isTargeted ? 2 : 1, dash: isTargeted ? [] : [7, 5])
-                )
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return ZStack {
+            shape.fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
 
-            HStack(spacing: 12) {
-                Image(systemName: "envelope.badge")
-                    .font(.system(size: 28, weight: .regular))
-                    .foregroundStyle(isTargeted ? Color.accentColor : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(runner.busy ? "Working…" : "Drop .md email files here")
-                        .font(.headline)
-                    Text("Opens an Apple Mail draft — never sends")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            shape
+                .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.55 : 0.18), lineWidth: 6)
+                .blur(radius: 5)
+                .offset(y: 2)
+                .mask(
+                    shape.fill(
+                        LinearGradient(
+                            colors: [.black, .clear],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.65)
+                        )
+                    )
+                )
+                .allowsHitTesting(false)
+
+            wellContent
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+            shape.strokeBorder(
+                isTargeted
+                    ? Color.accentColor
+                    : Color.primary.opacity(colorScheme == .dark ? 0.5 : 0.38),
+                style: StrokeStyle(lineWidth: 1.75, dash: [5, 4])
+            )
+            .allowsHitTesting(false)
         }
         .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers)
         }
+    }
+
+    private var wellContent: some View {
+        HStack(spacing: 14) {
+            dropMessageIcon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(runner.busy ? "Working…" : "Drop .md email files here")
+                    .font(.headline)
+                Text("Opens an Apple Mail draft — never sends")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                HeaderActionButton(
+                    title: "Choose Files",
+                    symbol: "doc",
+                    style: .secondary,
+                    enabled: !runner.busy
+                ) {
+                    chooseFiles()
+                }
+                .help("Choose Markdown email files")
+                .accessibilityLabel("Choose Files")
+                if runner.busy {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Opening drafts…")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                }
+            }
+            if !inbox.recentDrops.isEmpty {
+                recentDropsPanel
+                    .frame(width: 196)
+            }
+        }
+    }
+
+    private var dropMessageIcon: some View {
+        ZStack(alignment: .top) {
+            Image(systemName: "envelope.fill")
+                .font(.system(size: 28, weight: .medium))
+            Image(systemName: "arrow.down")
+                .font(.system(size: 11, weight: .bold))
+                .offset(y: -10)
+        }
+        .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
+        .frame(width: 36, height: 40)
+        .accessibilityHidden(true)
+    }
+
+    private var dropWellFill: Color {
+        Color.black.opacity(colorScheme == .dark ? 0.28 : 0.08)
     }
 
     private func chooseFiles() {

@@ -151,7 +151,8 @@ def add_common_subcommands(sub: argparse._SubParsersAction) -> None:
 
     p_ad = sub.add_parser(
         "append-draft",
-        help="Compose a Mail draft via AppleScript (Make Mail Draft)",
+        aliases=["draft"],
+        help="Open an Apple Mail draft from Markdown (never sends)",
     )
     p_ad.add_argument("markdown", nargs="+", help=".md file(s) with email front matter")
     p_ad.set_defaults(func=cmd_append_draft)

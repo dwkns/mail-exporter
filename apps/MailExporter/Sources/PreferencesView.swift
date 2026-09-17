@@ -2,30 +2,39 @@ import AppKit
 import SwiftUI
 
 struct PreferencesView: View {
-    @ObservedObject private var prefs = AppPreferences.shared
-    @EnvironmentObject private var store: JobsStore
-
     var body: some View {
         TabView {
             StoragePreferencesView()
                 .tabItem {
                     Label("Storage", systemImage: "externaldrive")
                 }
-                .tag("storage")
 
             UpdatesPreferencesView()
                 .tabItem {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
-                .tag("updates")
 
             AdvancedPreferencesView()
                 .tabItem {
                     Label("Advanced", systemImage: "gearshape.2")
                 }
-                .tag("advanced")
         }
-        .frame(width: 520, height: 320)
+        .frame(width: 520, height: 332)
+        .background(HiddenWindowTitle())
+    }
+}
+
+private struct SettingsPane<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            content()
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
@@ -34,49 +43,48 @@ struct StoragePreferencesView: View {
     @EnvironmentObject private var store: JobsStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Store jobs in:")
-                    .font(.subheadline.weight(.semibold))
+        SettingsPane {
+            Text("Store jobs in")
+                .font(.subheadline.weight(.semibold))
 
-                Picker("", selection: Binding(
-                    get: { prefs.storageLocation },
-                    set: { newLoc in
-                        store.switchLocation(to: newLoc)
-                    }
-                )) {
-                    ForEach(StorageLocation.allCases) { loc in
-                        Text(loc.displayName).tag(loc)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-
-                if prefs.storageLocation == .custom {
-                    HStack {
-                        TextField("Folder or file path", text: $prefs.customStoragePath)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Choose…") {
-                            chooseCustomFolder()
-                        }
-                    }
-                    .padding(.leading, 20)
+            Picker("", selection: Binding(
+                get: { prefs.storageLocation },
+                set: { store.switchLocation(to: $0) }
+            )) {
+                ForEach(StorageLocation.allCases) { loc in
+                    Text(loc.displayName).tag(loc)
                 }
             }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Active jobs.json:")
+            if prefs.storageLocation == .custom {
+                HStack(spacing: 8) {
+                    TextField("Folder or file path", text: $prefs.customStoragePath)
+                        .textFieldStyle(.roundedBorder)
+                    Button(action: chooseCustomFolder) {
+                        Label("Choose…", systemImage: "folder")
+                            .labelStyle(.trailingIcon)
+                    }
+                }
+                .padding(.leading, 20)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Active jobs.json")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(store.configURL.path)
+                Text(displayPath)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.primary)
                     .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
             }
 
-            HStack(spacing: 12) {
-                Button("Reveal in Finder") {
-                    revealInFinder()
+            HStack(alignment: .center, spacing: 12) {
+                Button(action: revealInFinder) {
+                    Label("Reveal in Finder", systemImage: "folder")
+                        .labelStyle(.trailingIcon)
                 }
 
                 if prefs.storageLocation == .iCloud && !JobsStore.isICloudAvailable {
@@ -86,11 +94,16 @@ struct StoragePreferencesView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var displayPath: String {
+        let home = NSHomeDirectory()
+        let expanded = store.configURL.path
+        if expanded.hasPrefix(home) {
+            return "~" + expanded.dropFirst(home.count)
+        }
+        return expanded
     }
 
     private func chooseCustomFolder() {
@@ -100,8 +113,7 @@ struct StoragePreferencesView: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Select"
         if panel.runModal() == .OK, let url = panel.url {
-            let path = url.path
-            store.switchLocation(to: .custom, customPath: path)
+            store.switchLocation(to: .custom, customPath: url.path)
         }
     }
 
@@ -127,102 +139,74 @@ struct UpdatesPreferencesView: View {
     @ObservedObject private var updater = AppUpdater.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .resizable()
-                    .frame(width: 34, height: 34)
-                    .foregroundStyle(.blue)
+        SettingsPane {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("MailExporter")
+                    .font(.subheadline.weight(.semibold))
+                Text("Version \(updater.currentVersion) (build \(updater.currentBuild))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("MailExporter")
-                        .font(.headline)
-                    Text("Installed Version \(updater.currentVersion) (build \(updater.currentBuild))")
-                        .font(.subheadline)
+            Toggle("Automatically check for updates on launch", isOn: $prefs.autoCheckUpdates)
+
+            HStack(spacing: 12) {
+                Button {
+                    updater.showUpdateWindow()
+                } label: {
+                    if updater.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Checking GitHub…")
+                    } else {
+                        Text("Check for Updates Now")
+                    }
+                }
+                .disabled(updater.isChecking || updater.isUpdating)
+
+                if let last = updater.lastCheckDate {
+                    Text("Last checked \(Self.formatDate(last))")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle("Automatically check for updates on launch", isOn: $prefs.autoCheckUpdates)
-                    .font(.subheadline)
-
-                HStack(spacing: 12) {
-                    Button(action: {
-                        updater.showUpdateWindow()
-                    }) {
-                        if updater.isChecking {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Checking GitHub…")
-                        } else {
-                            Text("Check for Updates Now")
-                        }
-                    }
-                    .disabled(updater.isChecking || updater.isUpdating)
-
-                    if let last = updater.lastCheckDate {
-                        Text("Last checked: \(Self.formatDate(last))")
+            if updater.updateAvailable {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Version \(updater.latestVersion) is available")
+                        .font(.subheadline.weight(.semibold))
+                    if !updater.releaseNotes.isEmpty {
+                        Text(updater.releaseNotes)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
-                }
-
-                if updater.updateAvailable {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Image(systemName: "sparkles")
-                                .foregroundStyle(.yellow)
-                            Text("Version \(updater.latestVersion) is available!")
-                                .font(.subheadline.weight(.semibold))
-                        }
-
-                        if !updater.releaseNotes.isEmpty {
-                            Text(updater.releaseNotes)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                        }
-
-                        Button(action: {
-                            Task { await updater.downloadAndInstall() }
-                        }) {
-                            if updater.isUpdating {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Updating…")
-                            } else {
-                                Text("Download and Install Update")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(updater.isUpdating)
-                    }
-                    .padding(10)
-                    .background(Color.accentColor.opacity(0.1))
-                    .cornerRadius(8)
-                } else if !updater.statusMessage.isEmpty {
-                    HStack(spacing: 6) {
-                        if updater.errorMessage != nil {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.red)
+                    Button {
+                        Task { await updater.downloadAndInstall() }
+                    } label: {
+                        if updater.isUpdating {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Updating…")
                         } else {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                            Text("Download and Install Update")
                         }
-                        Text(updater.statusMessage)
-                            .foregroundStyle(updater.errorMessage != nil ? .red : .primary)
                     }
-                    .font(.caption)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(updater.isUpdating)
                 }
+            } else if !updater.statusMessage.isEmpty {
+                HStack(spacing: 6) {
+                    if updater.errorMessage != nil {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
+                    Text(updater.statusMessage)
+                        .foregroundStyle(updater.errorMessage != nil ? Color.red : Color.secondary)
+                }
+                .font(.caption)
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private static func formatDate(_ date: Date) -> String {
@@ -239,10 +223,9 @@ struct AdvancedPreferencesView: View {
     @State private var showingResetAlert = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        SettingsPane {
             VStack(alignment: .leading, spacing: 4) {
                 Toggle("Debug Mode", isOn: $prefs.debugMode)
-                    .font(.subheadline.weight(.semibold))
 
                 Text("Shows Clear Target on Export so you can wipe a folder and re-export from scratch.")
                     .font(.caption)
@@ -265,13 +248,8 @@ struct AdvancedPreferencesView: View {
                 Button("Reset to Factory Settings…", role: .destructive) {
                     showingResetAlert = true
                 }
-                .padding(.top, 2)
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .alert("Reset MailExporter to Factory Settings?", isPresented: $showingResetAlert) {
             Button("Reset to Factory Settings", role: .destructive) {
                 store.resetToFactorySettings()

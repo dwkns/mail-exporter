@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    static let mailExporterNewExport = Notification.Name("mailExporterNewExport")
+    static let mailExporterExportAll = Notification.Name("mailExporterExportAll")
+}
+
 @main
 struct MailExporterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -14,13 +19,26 @@ struct MailExporterApp: App {
                 .environmentObject(store)
                 .environmentObject(prefs)
                 .frame(minWidth: 900, minHeight: 580)
+                .background(HiddenWindowTitle())
         }
         .defaultSize(width: 960, height: 640)
         // Claim file-open events so a Dock/Finder drop orders this window front.
         // (matching: [] left the window behind on cold-start drops.)
         .handlesExternalEvents(matching: ["*"])
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("New Export") {
+                    NotificationCenter.default.post(name: .mailExporterNewExport, object: nil)
+                }
+                .keyboardShortcut("n")
+            }
+            CommandGroup(after: .newItem) {
+                Button("Export All") {
+                    NotificationCenter.default.post(name: .mailExporterExportAll, object: nil)
+                }
+                .keyboardShortcut("e")
+                .disabled(store.jobs.isEmpty)
+            }
             CommandGroup(replacing: .importExport) {
                 Button("Import Settings…") {
                     store.promptImportSettings()
@@ -43,6 +61,7 @@ struct MailExporterApp: App {
             PreferencesView()
                 .environmentObject(prefs)
                 .environmentObject(store)
+                .background(HiddenWindowTitle())
         }
         .windowResizability(.contentSize)
     }

@@ -88,7 +88,7 @@ else
   VERSION="${MAJOR}.${MINOR}.${PATCH}"
 fi
 
-BUILD_NUMBER="$(git -C "${REPO}" rev-list --count HEAD 2>/dev/null || echo "1")"
+BUILD_NUMBER="${BUILD_NUMBER:-$(git -C "${REPO}" rev-list --count HEAD 2>/dev/null || echo "1")}"
 echo "Building MailExporter v${VERSION} (build ${BUILD_NUMBER})…"
 
 rm -rf "${APP}" "${PYI_DIST}" "${PYI_WORK}"
@@ -236,6 +236,7 @@ fi
 echo "Compiling Swift UI…"
 swiftc \
   "${SRC}/MailExporterApp.swift" \
+  "${SRC}/AppChrome.swift" \
   "${SRC}/AppPreferences.swift" \
   "${SRC}/PreferencesView.swift" \
   "${SRC}/AppUpdater.swift" \
