@@ -237,6 +237,11 @@ find_mac_provision_profile() {
   return 1
 }
 
+this_mac_provisioning_udid() {
+  system_profiler SPHardwareDataType 2>/dev/null \
+    | awk -F': ' '/Provisioning UDID/{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}'
+}
+
 refresh_icloud_profile() {
   local proj="${ROOT}/signing/MailExporter.xcodeproj"
   if [[ ! -d "${proj}" ]]; then
@@ -245,11 +250,17 @@ refresh_icloud_profile() {
   if [[ -n "${GITHUB_ACTIONS:-}" || -n "${CI:-}" ]]; then
     return 1
   fi
-  echo "Creating/refreshing Mac iCloud provisioning profile (automatic signing)…"
+  local dest="generic/platform=macOS"
+  local udid
+  udid="$(this_mac_provisioning_udid || true)"
+  if [[ -n "${udid}" ]]; then
+    dest="platform=macOS,arch=arm64,id=${udid}"
+  fi
+  echo "Creating/refreshing Mac iCloud provisioning profile (automatic signing, ${dest})…"
   xcodebuild \
     -project "${proj}" \
     -scheme MailExporter \
-    -destination 'generic/platform=macOS' \
+    -destination "${dest}" \
     -allowProvisioningUpdates \
     -allowProvisioningDeviceRegistration \
     -derivedDataPath "${ROOT}/signing/DerivedData" \
