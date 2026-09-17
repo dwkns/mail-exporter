@@ -183,6 +183,17 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
       </dict>
     </dict>
   </array>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.dwkns.MailExporter</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>mailexporter</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
@@ -359,22 +370,16 @@ else
 fi
 
 echo "Compiling Swift UI…"
+SWIFT_FILES=()
+while IFS= read -r -d '' f; do
+  SWIFT_FILES+=("$f")
+done < <(find "${SRC}" -name '*.swift' -print0 | sort -z)
+if [[ "${#SWIFT_FILES[@]}" -eq 0 ]]; then
+  echo "error: no Swift sources in ${SRC}" >&2
+  exit 1
+fi
 swiftc \
-  "${SRC}/MailExporterApp.swift" \
-  "${SRC}/AppChrome.swift" \
-  "${SRC}/AppPreferences.swift" \
-  "${SRC}/PreferencesView.swift" \
-  "${SRC}/AppUpdater.swift" \
-  "${SRC}/JobsStore.swift" \
-  "${SRC}/EngineBridge.swift" \
-  "${SRC}/ComposeBridge.swift" \
-  "${SRC}/ComposeInbox.swift" \
-  "${SRC}/MailAccessProbe.swift" \
-  "${SRC}/PermissionsBanner.swift" \
-  "${SRC}/ContentView.swift" \
-  "${SRC}/ConfigView.swift" \
-  "${SRC}/RunView.swift" \
-  "${SRC}/SendView.swift" \
+  "${SWIFT_FILES[@]}" \
   -o "${BIN}" \
   -sdk "$(xcrun --show-sdk-path)" \
   -target arm64-apple-macos13 \
@@ -415,6 +420,11 @@ fi
 
 if [[ -f "${ROOT}/Resources/PutHTMLOnClipboard.js" ]]; then
   cp "${ROOT}/Resources/PutHTMLOnClipboard.js" "${HELPER_DIR}/PutHTMLOnClipboard.js"
+fi
+
+if [[ -f "${REPO}/skills/mail-exporter/SKILL.md" ]]; then
+  mkdir -p "${HELPER_DIR}/skills/mail-exporter"
+  cp "${REPO}/skills/mail-exporter/SKILL.md" "${HELPER_DIR}/skills/mail-exporter/SKILL.md"
 fi
 
 mkdir -p "${HELPER_DIR}/bin"

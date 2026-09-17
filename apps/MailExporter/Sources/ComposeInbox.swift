@@ -120,7 +120,14 @@ final class ComposeRunner: ObservableObject {
                 if self.statusLines.count > 12 {
                     self.statusLines = Array(self.statusLines.prefix(12))
                 }
-                // Leave Mail (and the new draft) in front — do not steal focus back.
+                let blob = result.summary + "\n" + result.detail
+                if MailAccessProbe.looksLikeAutomationDenial(blob) {
+                    UserDefaults.standard.set(true, forKey: "mailExporterNeedsAutomation")
+                    UserDefaults.standard.set(false, forKey: "dismissedAutomationWarning")
+                    NotificationCenter.default.post(name: .mailExporterPermissionsChanged, object: nil)
+                } else if result.ok {
+                    UserDefaults.standard.set(false, forKey: "mailExporterNeedsAutomation")
+                }
                 self.drainInbox()
             }
         }

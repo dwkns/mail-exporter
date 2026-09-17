@@ -284,7 +284,7 @@ final class AppUpdater: ObservableObject {
                 proc.arguments = [
                     "release", "download", tag,
                     "-R", self.repo,
-                    "-p", "*.zip",
+                    "-p", "MailExporter-macOS-arm64.zip*",
                     "-D", tmpDir.path,
                     "--clobber"
                 ]
@@ -313,6 +313,8 @@ final class AppUpdater: ObservableObject {
             }
             let finalZipURL = tmpDir.appendingPathComponent(downloadedZip)
 
+            try await verifyZip(finalZipURL, in: tmpDir, tag: activeRelease?.tag ?? latestVersion)
+
             // Extract with ditto
             let extractDir = tmpDir.appendingPathComponent("extracted")
             try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
@@ -322,6 +324,9 @@ final class AppUpdater: ObservableObject {
             ditto.arguments = ["-x", "-k", finalZipURL.path, extractDir.path]
             try ditto.run()
             ditto.waitUntilExit()
+            if ditto.terminationStatus != 0 {
+                throw NSError(domain: "AppUpdater", code: 7, userInfo: [NSLocalizedDescriptionKey: "Couldn’t extract the update zip."])
+            }
 
             // Find MailExporter.app in extractDir
             var foundAppURL: URL?
@@ -338,12 +343,7 @@ final class AppUpdater: ObservableObject {
                 throw NSError(domain: "AppUpdater", code: 6, userInfo: [NSLocalizedDescriptionKey: "Extracted archive did not contain MailExporter.app."])
             }
 
-            // Remove quarantine
-            let xattr = Process()
-            xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-            xattr.arguments = ["-cr", newAppURL.path]
-            try? xattr.run()
-            xattr.waitUntilExit()
+            try verifyCodesign(newAppURL)
 
             // Current target app bundle to replace
             let targetBundlePath = Bundle.main.bundleURL.path
@@ -354,8 +354,7 @@ final class AppUpdater: ObservableObject {
             let script = """
             sleep 1
             rm -rf "\(targetBundlePath)"
-            cp -R "\(newAppURL.path)" "\(targetBundlePath)"
-            xattr -cr "\(targetBundlePath)"
+            ditto "\(newAppURL.path)" "\(targetBundlePath)"
             open "\(targetBundlePath)"
             """
 
@@ -372,6 +371,86 @@ final class AppUpdater: ObservableObject {
             let msg = error.localizedDescription
             errorMessage = msg
             statusMessage = "Update failed: \(msg)"
+        }
+    }
+
+    private func verifyZip(_ zipURL: URL, in directory: URL, tag: String) async throws {
+        statusMessage = "Checking SHA-256…"
+        let expected = try await fetchExpectedSHA256(tag: tag, directory: directory)
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/shasum")
+        proc.arguments = ["-a", "256", zipURL.path]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        try proc.run()
+        proc.waitUntilExit()
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let actual = text.split(whereSeparator: \.isWhitespace).first.map(String.init)?.lowercased() ?? ""
+        guard !expected.isEmpty, actual == expected else {
+            throw NSError(
+                domain: "AppUpdater",
+                code: 8,
+                userInfo: [NSLocalizedDescriptionKey: "SHA-256 mismatch. Refusing to install this zip."]
+            )
+        }
+    }
+
+    private func fetchExpectedSHA256(tag: String, directory: URL) async throws -> String {
+        let sidecarNames = [
+            "MailExporter-macOS-arm64.zip.sha256",
+            "MailExporter-macOS-arm64.zip.sha256.txt",
+        ]
+        for name in sidecarNames {
+            let url = directory.appendingPathComponent(name)
+            if let text = try? String(contentsOf: url, encoding: .utf8) {
+                if let hash = text.split(whereSeparator: \.isWhitespace).first {
+                    return String(hash).lowercased()
+                }
+            }
+        }
+        let tagName = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        let urlString = "https://github.com/\(repo)/releases/download/v\(tagName)/MailExporter-macOS-arm64.zip.sha256"
+        guard let url = URL(string: urlString) else {
+            throw NSError(domain: "AppUpdater", code: 9, userInfo: [NSLocalizedDescriptionKey: "Invalid checksum URL"])
+        }
+        var req = URLRequest(url: url)
+        req.setValue("MailExporter-App", forHTTPHeaderField: "User-Agent")
+        let token = AppPreferences.shared.gitHubToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let text = String(data: data, encoding: .utf8),
+              let hash = text.split(whereSeparator: \.isWhitespace).first
+        else {
+            throw NSError(
+                domain: "AppUpdater",
+                code: 9,
+                userInfo: [NSLocalizedDescriptionKey: "Couldn’t download the release SHA-256. Refusing to install."]
+            )
+        }
+        return String(hash).lowercased()
+    }
+
+    private func verifyCodesign(_ appURL: URL) throws {
+        statusMessage = "Verifying code signature…"
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        proc.arguments = ["--verify", "--deep", "--strict", appURL.path]
+        let err = Pipe()
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = err
+        try proc.run()
+        proc.waitUntilExit()
+        if proc.terminationStatus != 0 {
+            let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "AppUpdater",
+                code: 10,
+                userInfo: [NSLocalizedDescriptionKey: "codesign --verify failed. \(msg)"]
+            )
         }
     }
 }

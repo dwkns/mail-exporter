@@ -119,21 +119,23 @@ struct ExportJob: Identifiable, Equatable, Codable {
     var groups: [MatchGroup]
     var includeSent: Bool
     var includeBin: Bool
+    var includeThread: Bool
     /// Base64-encoded URL bookmark data to track moved or renamed folders on disk
     var bookmark: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, outputDir, match, includeSent, includeBin, bookmark
+        case id, name, outputDir, match, includeSent, includeBin, includeThread, bookmark
     }
 
     init(
         id: String = UUID().uuidString,
         name: String = "New Export",
-        outputDir: String = NSHomeDirectory() + "/Desktop/Mail Export",
+        outputDir: String = "",
         conjunction: String = "all",
         groups: [MatchGroup] = [MatchGroup()],
         includeSent: Bool = true,
         includeBin: Bool = false,
+        includeThread: Bool = false,
         bookmark: String? = nil
     ) {
         self.id = id
@@ -143,6 +145,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         self.groups = groups
         self.includeSent = includeSent
         self.includeBin = includeBin
+        self.includeThread = includeThread
         self.bookmark = bookmark
     }
 
@@ -153,6 +156,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         outputDir = try c.decode(String.self, forKey: .outputDir)
         includeSent = try c.decodeIfPresent(Bool.self, forKey: .includeSent) ?? true
         includeBin = try c.decodeIfPresent(Bool.self, forKey: .includeBin) ?? false
+        includeThread = try c.decodeIfPresent(Bool.self, forKey: .includeThread) ?? false
         bookmark = try c.decodeIfPresent(String.self, forKey: .bookmark)
         // Ignore legacy lastRunSummary / lastRunDetail — export feedback is session-only.
 
@@ -172,6 +176,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         try c.encode(outputDir, forKey: .outputDir)
         try c.encode(includeSent, forKey: .includeSent)
         try c.encode(includeBin, forKey: .includeBin)
+        try c.encode(includeThread, forKey: .includeThread)
         try c.encodeIfPresent(bookmark, forKey: .bookmark)
         try c.encode(
             MatchPayload(conjunction: conjunction, groups: groups),
@@ -248,6 +253,7 @@ struct JobsDocument: Codable {
 }
 
 enum FolderStatus: Equatable {
+    case unset
     case exists(URL)
     case moved(suggestedURL: URL)
     case inTrash(trashURL: URL)
@@ -341,11 +347,11 @@ private final class JobsCloudWatch {
 @MainActor
 final class JobsStore: ObservableObject {
     @Published var jobs: [ExportJob] = []
-    @Published var selectedID: String?
     @Published var status: String = ""
     /// Shown when Mail library access is blocked.
     @Published var needsFullDiskAccess: Bool = false
     @Published var needsAccessibility: Bool = false
+    @Published var needsAutomation: Bool = false
 
     private let cloudWatch = JobsCloudWatch()
     private var ignoreCloudReloadUntil = Date.distantPast
@@ -586,6 +592,18 @@ final class JobsStore: ObservableObject {
     func refreshMailAccess() {
         needsFullDiskAccess = !MailAccessProbe.canAccessMailLibrary()
         needsAccessibility = !MailAccessProbe.canAccessAccessibility()
+        needsAutomation = UserDefaults.standard.bool(forKey: "mailExporterNeedsAutomation")
+    }
+
+    func flagAutomationRequired() {
+        UserDefaults.standard.set(true, forKey: "mailExporterNeedsAutomation")
+        UserDefaults.standard.set(false, forKey: "dismissedAutomationWarning")
+        needsAutomation = true
+    }
+
+    func clearAutomationRequired() {
+        UserDefaults.standard.set(false, forKey: "mailExporterNeedsAutomation")
+        needsAutomation = false
     }
 
     /// Re-show the Full Disk banner after a real access failure (overrides prior dismiss).
@@ -633,9 +651,6 @@ final class JobsStore: ObservableObject {
             let data = try Self.coordinateRead(from: targetURL)
             let doc = try JSONDecoder().decode(JobsDocument.self, from: data)
             jobs = doc.jobs
-            if selectedID == nil {
-                selectedID = jobs.first?.id
-            }
             let n = jobs.count
             status = n == 1 ? "1 export" : "\(n) exports"
             if targetURL != url {
@@ -686,9 +701,6 @@ final class JobsStore: ObservableObject {
                 let data = try Data(contentsOf: url)
                 let doc = try JSONDecoder().decode(JobsDocument.self, from: data)
                 jobs = doc.jobs
-                if selectedID == nil {
-                    selectedID = jobs.first?.id
-                }
                 save()
                 status = "Imported \(jobs.count) mailbox\(jobs.count == 1 ? "" : "es") from \(url.lastPathComponent)"
             } catch {
@@ -703,9 +715,6 @@ final class JobsStore: ObservableObject {
 
     func resetToFactorySettings() {
         let fm = FileManager.default
-        for job in jobs {
-            cleanUpScaffoldFolderIfEmpty(at: job.outputDir)
-        }
         let pathsToRemove: [String] = [
             Self.defaultLocalURL.path,
             Self.defaultICloudURL?.path,
@@ -718,13 +727,15 @@ final class JobsStore: ObservableObject {
         }
         if !AppPreferences.shared.customStoragePath.isEmpty {
             let custom = (AppPreferences.shared.customStoragePath as NSString).expandingTildeInPath
-            if fm.fileExists(atPath: custom) {
-                try? fm.removeItem(atPath: custom)
+            let url = URL(fileURLWithPath: custom)
+            let file = url.pathExtension.lowercased() == "json"
+                ? url : url.appendingPathComponent("jobs.json")
+            if fm.fileExists(atPath: file.path) {
+                try? fm.removeItem(at: file)
             }
         }
         AppPreferences.shared.reset()
         jobs = []
-        selectedID = nil
         saveWithoutMoveDetection()
         status = "Reset to factory defaults"
     }
@@ -855,9 +866,20 @@ final class JobsStore: ObservableObject {
         }
     }
 
+    static func isForbiddenOutputDir(_ raw: String) -> Bool {
+        let path = ((raw as NSString).expandingTildeInPath as NSString).resolvingSymlinksInPath
+        if path == "/" { return true }
+        let mail = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Mail")
+        if path == mail || path.hasPrefix(mail + "/") { return true }
+        return false
+    }
+
     func folderStatus(for job: ExportJob) -> FolderStatus {
         let raw = job.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return .notFound(candidateURL: nil) }
+        guard !raw.isEmpty else { return .unset }
+        if Self.isForbiddenOutputDir(raw) {
+            return .notFound(candidateURL: nil)
+        }
         let path = ((raw as NSString).expandingTildeInPath as NSString).resolvingSymlinksInPath
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -965,23 +987,14 @@ final class JobsStore: ObservableObject {
     private static let fallbackHowToTemplate = """
     # MailExporter — how to use this folder
 
-    Smart mailbox: **{{MAILBOX_NAME}}**
-    Path: `{{OUTPUT_DIR}}`
-
     This folder holds exported Apple Mail messages (`*.eml`) for AI admin context.
     Write Markdown drafts in `{{OUTPUT_DIR}}/Drafts` as `NNN_who_subject.md`.
-    After an exported `.eml` shows the mail was sent, move that file to `{{OUTPUT_DIR}}/Sent`.
+    After an exported `.eml` shows the mail was sent, MailExporter can move that file to `{{OUTPUT_DIR}}/Sent`.
 
-    Use the MailExporter MCP (`python3 -m mailexporter_mcp` from the mail-exporter repo):
-    `list_jobs`, `list_messages`, `read_message`, `compose_draft`, `check_matches`, `export_job`.
+    Use the installed helper MCP (`MailExporterEngine mcp`):
+    `list_jobs`, `list_messages`, `read_message`, `list_drafts`, `compose_draft`, `check_matches`, `export_job`.
+    Never send mail. Never invent email content.
     """
-
-    func addJob() {
-        let job = ExportJob()
-        jobs.append(job)
-        selectedID = job.id
-        save()
-    }
 
     /// Insert or replace a job and write `jobs.json`. Does not touch the export folder.
     func upsertJob(_ job: ExportJob) {
@@ -994,7 +1007,6 @@ final class JobsStore: ObservableObject {
                 refreshBookmark(for: idx)
             }
         }
-        selectedID = job.id
         save()
     }
 
@@ -1034,15 +1046,7 @@ final class JobsStore: ObservableObject {
         guard let idx = jobs.firstIndex(where: { $0.id == id }) else { return }
         let name = jobs[idx].name
         jobs.remove(at: idx)
-        if selectedID == id {
-            selectedID = jobs.first?.id
-        }
         save()
         status = "Removed “\(name)”"
-    }
-
-    func deleteSelected() {
-        guard let selectedID else { return }
-        deleteJob(id: selectedID)
     }
 }

@@ -4,6 +4,7 @@ struct PermissionsBanner: View {
     @EnvironmentObject private var store: JobsStore
     @AppStorage("dismissedFullDiskWarning") private var dismissedFullDisk: Bool = false
     @AppStorage("dismissedAccessibilityWarning") private var dismissedAccessibility: Bool = false
+    @AppStorage("dismissedAutomationWarning") private var dismissedAutomation: Bool = false
 
     var body: some View {
         if store.needsFullDiskAccess && !dismissedFullDisk {
@@ -11,9 +12,18 @@ struct PermissionsBanner: View {
                 icon: "lock.shield.fill",
                 tint: .orange,
                 title: "Full Disk Access Required",
-                detail: "MailExporter needs Full Disk Access to read ~/Library/Mail. If the toggle is already on but this banner stays, remove MailExporter from the list (−), add it again (+), then quit and reopen the app.",
+                detail: "Grant Full Disk Access to MailExporter (this app). If you run exports from Cursor or Claude Desktop instead, grant those apps. Terminal needs it for `python3 -m engine`. If the toggle is already on but this banner stays, remove MailExporter (−), add it again (+), then quit and reopen.",
                 settings: .fullDiskAccess,
                 onDismiss: { dismissedFullDisk = true }
+            )
+        } else if store.needsAutomation && !dismissedAutomation {
+            banner(
+                icon: "gearshape.2.fill",
+                tint: .orange,
+                title: "Automation → Mail Required",
+                detail: "The first draft can fail with −1743 until MailExporter is allowed to control Mail. System Settings → Privacy & Security → Automation → MailExporter → Mail.",
+                settings: .automation,
+                onDismiss: { dismissedAutomation = true }
             )
         } else if store.needsAccessibility && !dismissedAccessibility {
             banner(
@@ -65,6 +75,7 @@ struct PermissionsBanner: View {
                     // Re-show if the user dismissed earlier and is re-checking.
                     if settings == .fullDiskAccess { dismissedFullDisk = false }
                     if settings == .accessibility { dismissedAccessibility = false }
+                    if settings == .automation { dismissedAutomation = false }
                     store.refreshMailAccess()
                 }
                 .controlSize(.small)

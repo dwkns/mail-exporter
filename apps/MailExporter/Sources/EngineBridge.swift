@@ -25,17 +25,59 @@ enum EngineBridge {
 
     /// Touch the engine once at launch so the first export isn’t a cold disk hit.
     static func prewarm() {
-        DispatchQueue.global(qos: .utility).async {
-            guard let exe = bundledEngineURL() else { return }
-            let process = Process()
-            process.executableURL = exe
-            process.arguments = ["list"]
-            process.currentDirectoryURL = exe.deletingLastPathComponent()
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try? process.run()
-            process.waitUntilExit()
+        EngineSession.shared.prewarm()
+    }
+
+    static func parseEngineOutput(
+        _ outText: String,
+        errText: String = "",
+        status: Int32 = 0,
+        wall: CFAbsoluteTime = 0
+    ) throws -> EngineResult {
+        let lines = outText.split(whereSeparator: \.isNewline).map(String.init)
+        var summaryLine = lines.first { !$0.hasPrefix("{") } ?? ""
+        var jsonLine = lines.last { $0.hasPrefix("{") } ?? "{}"
+        var ok = status == 0 || status == 2
+        var matchCount: Int?
+
+        if jsonLine.hasPrefix("{"),
+           let data = jsonLine.data(using: .utf8),
+           var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            if let error = obj["error"] as? String, obj["results"] == nil {
+                throw NSError(
+                    domain: "MailExporter",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: error]
+                )
+            }
+            if let line = obj["line"] as? String, !line.isEmpty {
+                summaryLine = line
+            }
+            if let flag = obj["ok"] as? Bool {
+                ok = flag
+            }
+            if wall > 0 {
+                obj["clientWall_s"] = (wall * 1000).rounded() / 1000
+            }
+            if let results = obj["results"] as? [[String: Any]],
+               let first = results.first
+            {
+                matchCount = first["matchCount"] as? Int
+            }
+            if let pretty = try? JSONSerialization.data(withJSONObject: obj),
+               let s = String(data: pretty, encoding: .utf8)
+            {
+                jsonLine = s
+            }
         }
+
+        return EngineResult(
+            line: summaryLine.isEmpty ? (errText.isEmpty ? "Done" : errText) : summaryLine,
+            ok: ok,
+            rawJSON: jsonLine,
+            matchCount: matchCount
+        )
     }
 
     static func run(
@@ -89,37 +131,11 @@ enum EngineBridge {
             )
         }
 
-        let lines = outText.split(whereSeparator: \.isNewline).map(String.init)
-        let summaryLine = lines.first { !$0.hasPrefix("{") } ?? lines.first ?? ""
-        var jsonLine = lines.last { $0.hasPrefix("{") } ?? "{}"
-
-        // Annotate wall clock for local profiling without changing engine.
-        if jsonLine.hasPrefix("{"),
-           let data = jsonLine.data(using: .utf8),
-           var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        {
-            obj["clientWall_s"] = (wall * 1000).rounded() / 1000
-            if let pretty = try? JSONSerialization.data(withJSONObject: obj),
-               let s = String(data: pretty, encoding: .utf8)
-            {
-                jsonLine = s
-            }
-        }
-
-        var matchCount: Int?
-        if let data = jsonLine.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let results = obj["results"] as? [[String: Any]],
-           let first = results.first
-        {
-            matchCount = first["matchCount"] as? Int
-        }
-
-        return EngineResult(
-            line: summaryLine.isEmpty ? (errText.isEmpty ? "Done" : errText) : summaryLine,
-            ok: process.terminationStatus == 0,
-            rawJSON: jsonLine,
-            matchCount: matchCount
+        return try parseEngineOutput(
+            outText,
+            errText: errText,
+            status: process.terminationStatus,
+            wall: wall
         )
     }
 }

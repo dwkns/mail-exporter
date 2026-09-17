@@ -4,6 +4,26 @@ import SwiftUI
 extension Notification.Name {
     static let mailExporterNewExport = Notification.Name("mailExporterNewExport")
     static let mailExporterExportAll = Notification.Name("mailExporterExportAll")
+    static let mailExporterExportJob = Notification.Name("mailExporterExportJob")
+    static let mailExporterShowFolder = Notification.Name("mailExporterShowFolder")
+    static let mailExporterPermissionsChanged = Notification.Name("mailExporterPermissionsChanged")
+}
+
+enum MailExporterURL {
+    static func handle(_ url: URL) {
+        guard url.scheme?.lowercased() == "mailexporter" else { return }
+        let host = (url.host ?? url.path)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+        switch host {
+        case "export-all", "export":
+            NotificationCenter.default.post(name: .mailExporterExportAll, object: nil)
+        case "new":
+            NotificationCenter.default.post(name: .mailExporterNewExport, object: nil)
+        default:
+            break
+        }
+    }
 }
 
 @main
@@ -71,8 +91,10 @@ struct MailExporterApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--bench") {
-            runBenchAndExit()
-            return
+            FileHandle.standardError.write(
+                Data("MailExporter no longer accepts --bench; use the engine CLI.\n".utf8)
+            )
+            exit(2)
         }
         NSApp.setActivationPolicy(.regular)
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -94,8 +116,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Dock / Finder drop onto the app icon (and `open -a MailExporter file.md`).
     func application(_ application: NSApplication, open urls: [URL]) {
-        ComposeInbox.shared.enqueue(urls)
-        // Don't yank focus repeatedly — compose will activate Mail with the draft.
+        var files: [URL] = []
+        for url in urls {
+            if url.scheme?.lowercased() == "mailexporter" {
+                MailExporterURL.handle(url)
+                continue
+            }
+            files.append(url)
+        }
+        if !files.isEmpty {
+            ComposeInbox.shared.enqueue(files)
+        }
         DispatchQueue.main.async {
             Self.closeSurplusWindows()
         }
@@ -180,62 +211,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func runBenchAndExit() {
-        NSApp.setActivationPolicy(.accessory)
-        let store = JobsStore()
-        let config = JobsStore.defaultConfigURL()
-        let root = store.projectRoot
-        var args = ["export", "--dry-run", "--bench"]
-        if let idx = CommandLine.arguments.firstIndex(of: "--job-name"),
-           idx + 1 < CommandLine.arguments.count
-        {
-            args += ["--job-name", CommandLine.arguments[idx + 1]]
-        } else if let firstJob = store.jobs.first {
-            args += ["--job-name", firstJob.name]
-        } else {
-            args += ["--job-name", "Receipts"]
-        }
-        do {
-            let t0 = CFAbsoluteTimeGetCurrent()
-            let first = try EngineBridge.run(
-                projectRoot: root, arguments: args, configPath: config
-            )
-            let t1 = CFAbsoluteTimeGetCurrent()
-            let second = try EngineBridge.run(
-                projectRoot: root, arguments: args, configPath: config
-            )
-            let t2 = CFAbsoluteTimeGetCurrent()
-            let support = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/MailExporter")
-            try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-            let text = """
-            {"first_wall_s":\(t1 - t0),"second_wall_s":\(t2 - t1),"first":\(first.rawJSON),"second":\(second.rawJSON)}
-            """
-            try text.write(
-                to: support.appendingPathComponent("bench.json"),
-                atomically: true,
-                encoding: String.Encoding.utf8
-            )
-            fputs(
-                "first=\(String(format: "%.3f", t1 - t0))s second=\(String(format: "%.3f", t2 - t1))s\n",
-                stdout
-            )
-            exit(first.ok && second.ok ? 0 : 2)
-        } catch {
-            let support = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/MailExporter")
-            try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-            let msg = error.localizedDescription
-            let escaped = msg.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-                .replacingOccurrences(of: "\n", with: "\\n")
-            try? "{\"ok\":false,\"error\":\"\(escaped)\"}\n".write(
-                to: support.appendingPathComponent("bench.json"),
-                atomically: true,
-                encoding: .utf8
-            )
-            fputs("bench failed: \(msg)\n", stderr)
-            exit(1)
-        }
-    }
 }

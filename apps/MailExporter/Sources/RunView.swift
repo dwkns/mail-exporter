@@ -57,6 +57,20 @@ struct RunView: View {
             guard !busy, hasExportableJob else { return }
             run(jobID: nil)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterExportJob)) { note in
+            guard !busy, let name = note.userInfo?["name"] as? String else { return }
+            let needle = name.lowercased()
+            guard let job = store.jobs.first(where: { $0.name.lowercased() == needle }) else { return }
+            guard store.folderStatus(for: job).isValidForExport else { return }
+            run(jobID: job.id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterShowFolder)) { note in
+            guard let name = note.userInfo?["name"] as? String else { return }
+            let needle = name.lowercased()
+            guard let job = store.jobs.first(where: { $0.name.lowercased() == needle }) else { return }
+            let path = (job.outputDir as NSString).expandingTildeInPath
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        }
         .sheet(item: $editor) { item in
             JobEditorSheet(
                 presentation: item,
@@ -96,20 +110,40 @@ struct RunView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .accessibilityHidden(true)
             Text("Mail Exporter")
                 .font(.title2.weight(.semibold))
             if busy {
+                ProgressView()
+                    .controlSize(.small)
                 Text(progressLabel)
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .help("Elapsed time for the current export")
             }
             Spacer(minLength: 12)
+            Button {
+                editor = .add
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.bordered)
+            .disabled(busy)
+            .help("New export (⌘N)")
+            .accessibilityLabel("New export")
             HeaderActionButton(
                 title: busy ? "Exporting…" : "Export All",
                 symbol: "tray.and.arrow.down.fill",
                 enabled: !busy && hasExportableJob,
-                spinning: busy
+                spinning: false
             ) {
                 run(jobID: nil)
             }
@@ -118,7 +152,7 @@ struct RunView: View {
                     ? "Choose a valid folder before exporting"
                     : "Export all jobs that have a folder (⌘E)"
             )
-            .accessibilityLabel(busy ? "Exporting" : "Export all")
+            .accessibilityLabel(busy ? "Exporting" : "Export All")
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -126,23 +160,11 @@ struct RunView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            HeaderActionButton(
-                title: "New Export",
-                symbol: "plus",
-                enabled: !busy
-            ) {
-                editor = .add
-            }
-            .help("New export (⌘N)")
-            .accessibilityLabel("New export")
-
-            DraftDropZone()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
-        .background(Color(nsColor: .windowBackgroundColor))
+        DraftDropZone()
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var emptyState: some View {
@@ -157,14 +179,9 @@ struct RunView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 360)
             }
-            HeaderActionButton(
-                title: "New Export",
-                symbol: "plus"
-            ) {
-                editor = .add
-            }
-            .help("New export (⌘N)")
-            .accessibilityLabel("New export")
+            Text("Use + in the toolbar, or ⌘N.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 20)
@@ -181,8 +198,8 @@ struct RunView: View {
                         result: sessionResults[job.id],
                         busy: busy,
                         debugMode: prefs.debugMode,
-                        isRunningThis: busy && (runningJobID == nil || runningJobID == job.id),
-                        progressLabel: (busy && (runningJobID == nil || runningJobID == job.id))
+                        isRunningThis: busy && runningJobID == job.id,
+                        progressLabel: (busy && runningJobID == job.id)
                             ? rowProgressLabel(for: job.id) : nil,
                         isDetailsOpen: Binding(
                             get: { openDetailsID == job.id },
@@ -355,45 +372,43 @@ struct RunView: View {
 
         store.save()
         busy = true
-        runningJobID = jobID
+        runningJobID = targetJobs.first?.id
         startTicker()
         let root = store.projectRoot
         let config = store.configURL
         let started = Date()
-        let exportAllJobs = jobID == nil && targetJobs.count == store.jobs.count
         let jobIDs = targetJobs.map(\.id)
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let result: EngineResult
-                if exportAllJobs {
-                    result = try EngineBridge.run(
+                var pieces: [EngineResult] = []
+                for id in jobIDs {
+                    DispatchQueue.main.sync {
+                        runningJobID = id
+                    }
+                    let piece = try EngineSession.shared.export(
                         projectRoot: root,
-                        arguments: ["export"],
-                        configPath: config
+                        configPath: config,
+                        jobID: id,
+                        dryRun: false
                     )
-                } else if jobIDs.count == 1 {
-                    result = try EngineBridge.run(
-                        projectRoot: root,
-                        arguments: ["export", "--job-id", jobIDs[0]],
-                        configPath: config
-                    )
-                } else {
-                    result = try Self.runJobsInSequence(
-                        ids: jobIDs,
-                        projectRoot: root,
-                        configPath: config
-                    )
+                    pieces.append(piece)
+                    let pieceDuration = Date().timeIntervalSince(started)
+                    DispatchQueue.main.async {
+                        applyPartial(piece, jobID: id)
+                        lastDurations[id] = pieceDuration
+                    }
                 }
                 let duration = Date().timeIntervalSince(started)
+                let combined = Self.combine(pieces)
                 DispatchQueue.main.async {
                     stopTicker()
                     busy = false
                     runningJobID = nil
                     store.needsFullDiskAccess = false
                     recordDuration(duration, jobID: jobID)
-                    applyResult(result, focusedJobID: jobID, duration: duration)
+                    applyResult(combined, focusedJobID: jobID, duration: duration)
                     store.reload()
-                    notify("\(result.line) · \(DurationFormat.short(duration))")
+                    notify("\(combined.line) · \(DurationFormat.short(duration))")
                 }
             } catch {
                 let duration = Date().timeIntervalSince(started)
@@ -405,7 +420,7 @@ struct RunView: View {
                     if MailAccessProbe.looksLikeFullDiskDenial(message) {
                         store.flagFullDiskAccessRequired()
                     }
-                    markFailed(jobID: jobID, message: message, duration: duration)
+                    markFailed(jobID: runningJobID ?? jobID, message: message, duration: duration)
                     store.status = message
                     notify(message)
                 }
@@ -413,21 +428,12 @@ struct RunView: View {
         }
     }
 
-    private static func runJobsInSequence(
-        ids: [String],
-        projectRoot: URL,
-        configPath: URL
-    ) throws -> EngineResult {
+    private static func combine(_ pieces: [EngineResult]) -> EngineResult {
         var lines: [String] = []
         var chunks: [[String: Any]] = []
         var ok = true
         var matchCount = 0
-        for id in ids {
-            let piece = try EngineBridge.run(
-                projectRoot: projectRoot,
-                arguments: ["export", "--job-id", id],
-                configPath: configPath
-            )
+        for piece in pieces {
             if !piece.line.isEmpty { lines.append(piece.line) }
             ok = ok && piece.ok
             matchCount += piece.matchCount ?? 0
@@ -459,19 +465,55 @@ struct RunView: View {
         )
     }
 
+    private func applyPartial(_ result: EngineResult, jobID: String) {
+        let summary = Self.rowSummary(from: result, fallbackJobID: jobID)
+        sessionResults[jobID] = SessionExportResult(
+            summary: summary.text,
+            detail: result.rawJSON.isEmpty ? result.line : result.rawJSON,
+            durationSeconds: nil
+        )
+    }
+
+    private struct RowSummary {
+        var text: String
+        var newlyWritten: Int?
+    }
+
+    private static func rowSummary(from result: EngineResult, fallbackJobID: String) -> RowSummary {
+        if let data = result.rawJSON.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let results = obj["results"] as? [[String: Any]]
+        {
+            let item = results.first(where: { $0["id"] as? String == fallbackJobID }) ?? results.first
+            if let item {
+                if item["dryRun"] as? Bool == true, let match = item["matchCount"] as? Int {
+                    return RowSummary(
+                        text: match == 1 ? "1 match" : "\(match) matches",
+                        newlyWritten: 0
+                    )
+                }
+                if let n = item["newlyWritten"] as? Int {
+                    if n == 0 { return RowSummary(text: "Up to date", newlyWritten: 0) }
+                    return RowSummary(text: n == 1 ? "1 new" : "\(n) new", newlyWritten: n)
+                }
+            }
+        }
+        var line = result.line
+        if line.contains("0 copied") {
+            return RowSummary(text: "Up to date", newlyWritten: 0)
+        }
+        if let colon = line.firstIndex(of: ":") {
+            let after = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if !after.isEmpty { line = after }
+        }
+        return RowSummary(text: line, newlyWritten: nil)
+    }
+
     private func recordDuration(_ duration: TimeInterval, jobID: String?) {
         if let jobID {
             lastDurations[jobID] = duration
         } else {
             lastDurations["*"] = duration
-            // Spread across jobs when we only know the combined time.
-            let n = max(1, store.jobs.count)
-            let each = duration / Double(n)
-            for job in store.jobs {
-                if lastDurations[job.id] == nil {
-                    lastDurations[job.id] = each
-                }
-            }
         }
     }
 
@@ -497,39 +539,43 @@ struct RunView: View {
         duration: TimeInterval
     ) {
         store.status = result.line
-        let timeSuffix = " · \(DurationFormat.short(duration))"
         if let data = result.rawJSON.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let results = obj["results"] as? [[String: Any]]
         {
-            let per = results.isEmpty ? duration : duration / Double(results.count)
             for item in results {
                 guard let id = item["id"] as? String else { continue }
-                let summary = ((item["line"] as? String) ?? result.line) + timeSuffix
-                let detail: String
+                let pieceJSON: String
                 if let pretty = try? JSONSerialization.data(
                     withJSONObject: item,
                     options: [.prettyPrinted, .sortedKeys]
                 ),
                     let text = String(data: pretty, encoding: .utf8)
                 {
-                    detail = text
+                    pieceJSON = text
                 } else {
-                    detail = summary
+                    pieceJSON = result.line
                 }
-                sessionResults[id] = SessionExportResult(
-                    summary: summary,
-                    detail: detail,
-                    durationSeconds: per
+                let fake = EngineResult(
+                    line: (item["line"] as? String) ?? result.line,
+                    ok: true,
+                    rawJSON: "{\"results\":[\(pieceJSON)]}",
+                    matchCount: item["matchCount"] as? Int
                 )
-                lastDurations[id] = per
+                let summary = Self.rowSummary(from: fake, fallbackJobID: id)
+                sessionResults[id] = SessionExportResult(
+                    summary: summary.text,
+                    detail: pieceJSON,
+                    durationSeconds: focusedJobID == id ? duration : nil
+                )
             }
             return
         }
 
         if let focusedJobID {
+            let summary = Self.rowSummary(from: result, fallbackJobID: focusedJobID)
             sessionResults[focusedJobID] = SessionExportResult(
-                summary: result.line + timeSuffix,
+                summary: summary.text,
                 detail: result.rawJSON.isEmpty ? result.line : result.rawJSON,
                 durationSeconds: duration
             )
@@ -570,20 +616,10 @@ private struct ExportJobRow: View {
 
     @State private var hovering = false
 
-    private static let identityTints: [Color] = [
-        .blue, .teal, .indigo, .purple, .orange, .mint,
-    ]
-
-    private var identityTint: Color {
-        let hash = job.id.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
-        let index = abs(hash) % Self.identityTints.count
-        return Self.identityTints[index]
-    }
-
     private var glyphTint: Color {
         switch folderStatus {
-        case .exists:
-            return identityTint
+        case .exists, .unset:
+            return .accentColor
         case .moved:
             return .orange
         case .inTrash, .notFound:
@@ -595,6 +631,8 @@ private struct ExportJobRow: View {
         switch folderStatus {
         case .exists:
             return "tray.and.arrow.down.fill"
+        case .unset:
+            return "folder.badge.plus"
         case .moved:
             return "questionmark.folder.fill"
         case .inTrash:
@@ -613,6 +651,8 @@ private struct ExportJobRow: View {
         switch folderStatus {
         case .exists:
             return nil
+        case .unset:
+            return "Choose a folder"
         case .moved:
             return "Folder moved"
         case .inTrash:
@@ -625,7 +665,7 @@ private struct ExportJobRow: View {
     private var statusColor: Color {
         if isRunningThis { return .secondary }
         switch folderStatus {
-        case .exists:
+        case .exists, .unset:
             return .secondary
         case .moved:
             return .orange
@@ -636,7 +676,7 @@ private struct ExportJobRow: View {
 
     private var pathColor: Color {
         switch folderStatus {
-        case .exists:
+        case .exists, .unset:
             return .secondary
         case .moved:
             return .orange
@@ -646,8 +686,10 @@ private struct ExportJobRow: View {
     }
 
     private var displayPath: String {
+        let raw = job.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return "No folder yet" }
         let home = NSHomeDirectory()
-        let expanded = (job.outputDir as NSString).expandingTildeInPath
+        let expanded = (raw as NSString).expandingTildeInPath
         if expanded.hasPrefix(home) {
             return "~" + expanded.dropFirst(home.count)
         }
@@ -715,29 +757,45 @@ private struct ExportJobRow: View {
             HStack(spacing: 8) {
                 inlineRecoveryButtons
 
+                Menu {
+                    Button("Edit", action: onEdit)
+                    if folderStatus.isValidForExport {
+                        Button("Show in Finder", action: onShowInFinder)
+                        Button("Open in Cursor") {
+                            CursorLauncher.openFolder(job.outputDir)
+                        }
+                    } else {
+                        Button("Choose Folder…", action: onChooseFolder)
+                    }
+                    if debugMode && folderStatus.isValidForExport {
+                        Button("Clear Target", role: .destructive, action: onClearTarget)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Edit and more")
+                .accessibilityLabel("More")
+
                 if folderStatus.isValidForExport {
                     Button(action: onShowInFinder) {
                         Label("Show in Finder", systemImage: "folder")
-                            .labelStyle(.trailingIcon)
+                            .labelStyle(.leadingIcon)
                     }
                     .accessibilityLabel("Show in Finder")
                     .help("Reveal the export folder in Finder")
                 } else {
                     Button(action: onChooseFolder) {
                         Label("Choose Folder…", systemImage: "folder")
-                            .labelStyle(.trailingIcon)
+                            .labelStyle(.leadingIcon)
                     }
                     .accessibilityLabel("Choose Folder")
                 }
 
-                if debugMode && folderStatus.isValidForExport {
-                    Button("Clear Target", role: .destructive, action: onClearTarget)
-                        .disabled(busy)
-                }
-
                 Button(action: onExport) {
                     Label("Export", systemImage: "tray.and.arrow.down")
-                        .labelStyle(.trailingIcon)
+                        .labelStyle(.leadingIcon)
                 }
                 .buttonStyle(.borderedProminent)
                 .contentShape(Rectangle())
@@ -831,7 +889,7 @@ private struct ExportJobRow: View {
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
             }
-        case .exists:
+        case .exists, .unset:
             EmptyView()
         }
     }

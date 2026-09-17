@@ -82,31 +82,14 @@ struct DraftDropZone: View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         return ZStack {
             shape.fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
-
-            shape
-                .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.55 : 0.18), lineWidth: 6)
-                .blur(radius: 5)
-                .offset(y: 2)
-                .mask(
-                    shape.fill(
-                        LinearGradient(
-                            colors: [.black, .clear],
-                            startPoint: .top,
-                            endPoint: UnitPoint(x: 0.5, y: 0.65)
-                        )
-                    )
-                )
-                .allowsHitTesting(false)
-
             wellContent
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-
             shape.strokeBorder(
                 isTargeted
                     ? Color.accentColor
-                    : Color.primary.opacity(colorScheme == .dark ? 0.5 : 0.38),
-                style: StrokeStyle(lineWidth: 1.75, dash: [5, 4])
+                    : Color.primary.opacity(0.28),
+                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
             )
             .allowsHitTesting(false)
         }
@@ -127,16 +110,14 @@ struct DraftDropZone: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                HeaderActionButton(
-                    title: "Choose Files",
-                    symbol: "doc",
-                    style: .secondary,
-                    enabled: !runner.busy
-                ) {
-                    chooseFiles()
-                }
-                .help("Choose Markdown email files")
-                .accessibilityLabel("Choose Files")
+            Button("Choose Files") {
+                chooseFiles()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(runner.busy)
+            .help("Choose Markdown email files")
+            .accessibilityLabel("Choose Files")
                 if runner.busy {
                     HStack(spacing: 6) {
                         ProgressView()
@@ -185,9 +166,29 @@ struct DraftDropZone: View {
         }
         panel.prompt = "Open Drafts"
         panel.message = "Choose Markdown email files"
+        if let drafts = firstDraftsFolder() {
+            panel.directoryURL = drafts
+        }
         if panel.runModal() == .OK {
             runner.process(urls: panel.urls, alreadyRecorded: false)
         }
+    }
+
+    private func firstDraftsFolder() -> URL? {
+        let storeURL = JobsStore.defaultConfigURL()
+        guard let data = try? Data(contentsOf: storeURL),
+              let doc = try? JSONDecoder().decode(JobsDocument.self, from: data)
+        else { return nil }
+        for job in doc.jobs {
+            let raw = job.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { continue }
+            let drafts = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+                .appendingPathComponent("Drafts", isDirectory: true)
+            if FileManager.default.fileExists(atPath: drafts.path) {
+                return drafts
+            }
+        }
+        return nil
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {

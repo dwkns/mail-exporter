@@ -19,7 +19,7 @@ struct PreferencesView: View {
                     Label("Advanced", systemImage: "gearshape.2")
                 }
         }
-        .frame(width: 520, height: 332)
+        .frame(width: 520, height: 440)
         .background(HiddenWindowTitle())
     }
 }
@@ -75,9 +75,9 @@ struct StoragePreferencesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(displayPath)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.body)
                     .textSelection(.enabled)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .truncationMode(.middle)
             }
 
@@ -229,6 +229,18 @@ struct UpdatesPreferencesView: View {
                 }
                 .font(.caption)
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("GitHub token (optional)")
+                    .font(.subheadline.weight(.semibold))
+                SecureField("Personal access token", text: $prefs.gitHubToken)
+                    .textFieldStyle(.roundedBorder)
+                Text("Stored in Keychain. Only needed if GitHub rate-limits Check for Updates.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -244,6 +256,7 @@ struct AdvancedPreferencesView: View {
     @ObservedObject private var prefs = AppPreferences.shared
     @EnvironmentObject private var store: JobsStore
     @State private var showingResetAlert = false
+    @State private var mcpStatus = ""
 
     var body: some View {
         SettingsPane {
@@ -260,10 +273,47 @@ struct AdvancedPreferencesView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
+                Text("Cursor MCP")
+                    .font(.subheadline.weight(.semibold))
+                Text("Write the installed helper into ~/.cursor/mcp.json so Cursor can list jobs and read export folders.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Install mail-exporter MCP for Cursor") {
+                    mcpStatus = MCPInstall.installCursor()
+                }
+                Button("Install mail-exporter MCP for Claude Desktop") {
+                    mcpStatus = MCPInstall.installClaude()
+                }
+                Button("Install MailExporter skill") {
+                    mcpStatus = MCPInstall.installSkill()
+                }
+                if !mcpStatus.isEmpty {
+                    Text(mcpStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Export All every hour", isOn: $prefs.scheduledExportEnabled)
+                Text("Uses a user launchd job that opens mailexporter://export-all. Folders go stale unless something runs ⌘E.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 20)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Factory Reset")
                     .font(.subheadline.weight(.semibold))
 
-                Text("Resets all settings back to defaults and deletes mailbox configurations from both this Mac and iCloud. Exported emails already saved in your folders will not be deleted.")
+                Text("Resets settings and deletes jobs.json from this Mac and iCloud. Export folders on disk are left alone.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -279,7 +329,7 @@ struct AdvancedPreferencesView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently remove all mailbox configurations and preferences from this Mac and iCloud.\n\nTip: You can export a backup of your settings anytime from File → Export Settings… before resetting.")
+            Text("This will permanently remove jobs.json and preferences from this Mac and iCloud.\n\nExport folders stay on disk. You can export a backup from File → Export Settings… first.")
         }
     }
 }

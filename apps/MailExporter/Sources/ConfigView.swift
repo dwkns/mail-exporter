@@ -88,7 +88,8 @@ struct JobEditorSheet: View {
                     saveDraft()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSave)
+                .help(saveHelp)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -112,6 +113,25 @@ struct JobEditorSheet: View {
         }
     }
 
+    private var canSave: Bool {
+        let nameOK = !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let folder = store.folderStatus(for: draft)
+        return nameOK && folder.isValidForExport && !JobsStore.isForbiddenOutputDir(draft.outputDir)
+    }
+
+    private var saveHelp: String {
+        if draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Name this export"
+        }
+        if JobsStore.isForbiddenOutputDir(draft.outputDir) {
+            return "Choose a folder that is not / or inside ~/Library/Mail"
+        }
+        if !store.folderStatus(for: draft).isValidForExport {
+            return "Choose a real export folder before saving"
+        }
+        return "Save this export"
+    }
+
     private func saveDraft() {
         store.upsertJob(draft)
         dismiss()
@@ -130,6 +150,14 @@ struct JobEditorSheet: View {
     }
 
     private func applyFolder(_ url: URL) {
+        if JobsStore.isForbiddenOutputDir(url.path) {
+            let alert = NSAlert()
+            alert.messageText = "That folder can’t be used"
+            alert.informativeText = "Pick a folder that is not the disk root and not inside ~/Library/Mail. MailExporter never writes into Apple Mail’s store."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
         var next = draft
         store.applyFolderToJob(&next, url: url)
         draft = next
@@ -155,10 +183,11 @@ struct JobEditorSheet: View {
         DispatchQueue.global(qos: .userInitiated).async {
             defer { try? FileManager.default.removeItem(at: config) }
             do {
-                let result = try EngineBridge.run(
+                let result = try EngineSession.shared.export(
                     projectRoot: root,
-                    arguments: ["export", "--dry-run", "--job-id", jobID],
-                    configPath: config
+                    configPath: config,
+                    jobID: jobID,
+                    dryRun: true
                 )
                 let duration = Date().timeIntervalSince(started)
                 DispatchQueue.main.async {
@@ -169,6 +198,9 @@ struct JobEditorSheet: View {
                     if let n = result.matchCount {
                         let count = n == 1 ? "1 message matches" : "\(n) messages match"
                         previewText = "\(count) · \(time)"
+                        if let samples = Self.sampleSubjects(from: result), !samples.isEmpty {
+                            previewText += "\n" + samples
+                        }
                     } else {
                         previewText = "\(result.line) · \(time)"
                     }
@@ -207,6 +239,17 @@ struct JobEditorSheet: View {
     private func stopTicker() {
         tick?.invalidate()
         tick = nil
+    }
+
+    private static func sampleSubjects(from result: EngineResult) -> String? {
+        guard let data = result.rawJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = obj["results"] as? [[String: Any]],
+              let first = results.first,
+              let samples = first["samples"] as? [String],
+              !samples.isEmpty
+        else { return nil }
+        return samples.prefix(5).map { "• \($0)" }.joined(separator: "\n")
     }
 
     private static func formatDuration(_ seconds: TimeInterval) -> String {
@@ -253,7 +296,7 @@ struct SmartMailboxEditor: View {
             }
 
             switch folderStatus {
-            case .exists:
+            case .exists, .unset:
                 EmptyView()
             case .moved(let suggestedURL):
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -349,6 +392,7 @@ struct SmartMailboxEditor: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Include messages from Bin", isOn: $job.includeBin)
                     Toggle("Include messages from Sent", isOn: $job.includeSent)
+                    Toggle("Also export the rest of the thread", isOn: $job.includeThread)
                 }
                 .toggleStyle(.checkbox)
 
@@ -361,8 +405,9 @@ struct SmartMailboxEditor: View {
                         .monospacedDigit()
                 } else if !previewText.isEmpty {
                     Text(previewText)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(8)
                         .textSelection(.enabled)
                 }
                 Button(action: onPreview) {
@@ -430,7 +475,7 @@ private struct RuleGroupCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1.5)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1)
         )
     }
 }

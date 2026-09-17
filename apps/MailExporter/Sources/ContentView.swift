@@ -20,8 +20,15 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.refreshMailAccess()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterPermissionsChanged)) { _ in
+            store.refreshMailAccess()
+        }
         .onChange(of: inbox.generation) { _ in drainPendingDrafts() }
         .onOpenURL { url in
+            if url.scheme?.lowercased() == "mailexporter" {
+                MailExporterURL.handle(url)
+                return
+            }
             ComposeInbox.shared.enqueue([url])
         }
     }
