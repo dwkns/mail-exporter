@@ -196,3 +196,24 @@ def test_attachments_sidecar(tmp_path: Path, monkeypatch) -> None:
     assert written == 1
     files = list((out / "Attachments").rglob("scan.pdf"))
     assert files
+
+
+def test_mail_root_extra_scans_synthetic_mailbox(tmp_path: Path) -> None:
+    mailbox = tmp_path / "fake-mail" / "INBOX.mbox"
+    _write_emlx(
+        mailbox,
+        "1.emlx",
+        _rfc822(mid="<demo-1@x>", subject="MAE-DEMO-HIGHLIGHT invoice 1"),
+    )
+    _write_emlx(
+        mailbox,
+        "2.emlx",
+        _rfc822(mid="<demo-2@x>", subject="unrelated newsletter", body="nope"),
+    )
+    job = _job(tmp_path)
+    job.extra["mailRoot"] = str(tmp_path / "fake-mail")
+    result = run_job(job)
+    assert result["newlyWritten"] == 1
+    assert result["matchCount"] == 1
+    again = run_job(job)
+    assert again["newlyWritten"] == 0

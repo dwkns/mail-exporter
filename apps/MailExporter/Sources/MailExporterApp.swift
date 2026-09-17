@@ -18,6 +18,18 @@ enum MailExporterURL {
         switch host {
         case "export-all", "export":
             NotificationCenter.default.post(name: .mailExporterExportAll, object: nil)
+        case "export-job":
+            let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "name" })?
+                .value
+            if let name, !name.isEmpty {
+                NotificationCenter.default.post(
+                    name: .mailExporterExportJob,
+                    object: nil,
+                    userInfo: ["name": name]
+                )
+            }
         case "new":
             NotificationCenter.default.post(name: .mailExporterNewExport, object: nil)
         default:

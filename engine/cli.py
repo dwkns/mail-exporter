@@ -120,7 +120,7 @@ def run_export(
                 dry_run=dry_run,
                 force_full=force_full,
                 timings=timings,
-                candidates=shared_candidates,
+                candidates=None if job.extra.get("mailRoot") else shared_candidates,
             )
             results.append(result)
             if not result.get("countMatch", True) and not dry_run:
