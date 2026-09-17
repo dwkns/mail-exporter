@@ -55,13 +55,11 @@
 -- From: is optional. If given, and it matches one of your Mail accounts,
 -- the message is sent from that account.
 --
--- Attach: is optional and may appear on as many lines as you like. Paths are
--- relative to the email file's own folder. .. is allowed so a draft can
--- reach sibling folders (e.g. ../../../_source_files/scan.pdf). Absolute
--- paths and ~/… are rejected.
---     same folder                               certificate.pdf
---     nested                                    docs/certificate.pdf
---     parent / sibling                          ../../_source_files/scan.pdf
+-- Attach: is optional. Paths must stay inside the project folder
+-- (the parent of Email/). Prefer Documents/file.pdf from the project root.
+-- Absolute paths are allowed only when they resolve under that project.
+--     project Documents/                        Documents/certificate.pdf
+--     next to the .md                           certificate.pdf
 -- Filenames containing commas should be wrapped in double quotes.
 -- Anything that can't be found is reported at the end; the draft is still made.
 --
@@ -1261,8 +1259,40 @@ end mmdDropChars
 -- Everything below here is unchanged from the plain text version
 -- ---------------------------------------------------------------------------
 
--- Turn an attachment path into a full POSIX path relative to baseFolder.
--- Absolute paths and ~/… are rejected. .. is allowed.
+-- Turn an attachment path into a full POSIX path.
+-- Prefer the project root (parent of Email/), then the .md folder.
+on mmdProjectRoot(baseFolder)
+	set p to baseFolder
+	if p ends with "/" then set p to text 1 thru -2 of p
+	if p ends with "/Drafts" then set p to text 1 thru -8 of p
+	if p ends with "/Email" then set p to text 1 thru -7 of p
+	if p does not end with "/" then set p to p & "/"
+	return p
+end mmdProjectRoot
+
+on mmdPOSIXExists(posixPath)
+	try
+		POSIX file posixPath as alias
+		return true
+	on error
+		return false
+	end try
+end mmdPOSIXExists
+
+on mmdCanonicalPOSIX(posixPath)
+	try
+		return POSIX path of (POSIX file posixPath as alias)
+	on error
+		return posixPath
+	end try
+end mmdCanonicalPOSIX
+
+on mmdPathInsideProject(posixPath, projectRoot)
+	set resolved to mmdCanonicalPOSIX(posixPath)
+	if resolved starts with projectRoot then return true
+	return false
+end mmdPathInsideProject
+
 on mmdResolvePath(aPath, baseFolder)
 	set aPath to mmdTrim(aPath)
 
@@ -1272,12 +1302,29 @@ on mmdResolvePath(aPath, baseFolder)
 	end if
 
 	if aPath is "" then error "empty attachment path"
-	if aPath contains ".." then
-		error "attachment path must not contain ..: " & aPath
-	end if
+	if aPath starts with "~" then error "attachment path must stay inside the project: " & aPath
 
-	if baseFolder is "" then return aPath
-	return baseFolder & aPath
+	set projectRoot to mmdProjectRoot(baseFolder)
+	set candidate to ""
+	if aPath starts with "/" then
+		set candidate to aPath
+	else
+		set fromProject to projectRoot & aPath
+		if mmdPOSIXExists(fromProject) then
+			set candidate to fromProject
+		else if baseFolder is not "" then
+			set fromDrafts to baseFolder & aPath
+			if mmdPOSIXExists(fromDrafts) then
+				set candidate to fromDrafts
+			end if
+		end if
+	end if
+	if candidate is "" then error "not found: " & aPath
+	if not mmdPathInsideProject(candidate, projectRoot) then
+		error "attachment path must stay inside the project: " & aPath
+	end if
+	if mmdPOSIXExists(candidate) then return mmdCanonicalPOSIX(candidate)
+	error "not found: " & aPath
 end mmdResolvePath
 
 

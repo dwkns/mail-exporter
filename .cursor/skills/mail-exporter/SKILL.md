@@ -29,23 +29,37 @@ Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`
 
 `export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
 
-`read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must be relative to the `.md` (no `..`, `~/`, or absolute).
+`read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder** (prefer `Documents/…`).
 
-## Export folder
+## First read
+
+When the owner points you at a project folder (“read this folder”):
+
+1. Read `how_to_use.md` and `STATUS.md`.
+2. Skim `Email/` (`list_messages` / `.eml` names). `read_message` the important ones.
+3. Glance at `Documents/` and `Notes/`.
+4. Ask either **(a) more background** or **(b) what to do next**. Do not draft a reply on the first read unless they already said what to send.
+
+## Project folder
 
 ```
-<outputDir>/
-  *.eml
-  .exported-ids.json
-  _how_to_use.md
-  Attachments/<id>/
-  Drafts/
-  Sent/
+<project>/
+  how_to_use.md
+  STATUS.md
+  Email/
+    *.eml
+    .exported-ids.json
+    Attachments/<id>/
+    Drafts/
+    Sent/
+  Documents/
+  Notes/
+  _archive/
 ```
 
 After the owner sends, the next export can move matching Markdown from `Drafts/` to `Sent/` (job must include Sent). IMAP/Gmail drafts Mail creates may upload — “never sends” is not “never leaves this Mac.”
 
-`write_howto` with no job rewrites `_how_to_use.md` in every export folder. MailExporter also does this on launch when the bundled guide changed, so “re-read the instructions” picks up the latest copy.
+`write_howto` with no job rewrites `how_to_use.md` in every project. MailExporter also does this on launch when the bundled guide changed.
 
 ## Permissions
 

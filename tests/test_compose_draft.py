@@ -63,10 +63,14 @@ def test_compose_via_applescript_runs_osascript(draft_md: Path, tmp_path: Path) 
     assert result["via"] == "mail"
 
 
-def test_rejects_absolute_attach(tmp_path: Path) -> None:
-    secret = tmp_path / "secret.txt"
+def test_rejects_absolute_attach_outside_project(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    drafts.mkdir(parents=True)
+    secret = tmp_path / "other" / "secret.txt"
+    secret.parent.mkdir()
     secret.write_text("x", encoding="utf-8")
-    md = tmp_path / "d.md"
+    md = drafts / "d.md"
     md.write_text(
         f"---\nTo: a@b.com\nSubject: x\nAttach: {secret}\n---\n\nhi\n",
         encoding="utf-8",
@@ -74,24 +78,25 @@ def test_rejects_absolute_attach(tmp_path: Path) -> None:
     with patch("engine.compose_draft.applescript_path", return_value=tmp_path / "x.applescript"):
         result = compose_draft(md)
     assert result["ok"] is False
-    assert "attachment path" in result["error"].lower() or "under" in result["error"].lower()
+    assert "project" in result["error"].lower()
 
 
-def test_parent_relative_attach_is_rejected(tmp_path: Path) -> None:
-    drafts = tmp_path / "Email" / "Drafts"
-    source = tmp_path / "_source_files"
+def test_parent_relative_attach_escaping_project_is_rejected(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    outside = tmp_path / "outside"
     drafts.mkdir(parents=True)
-    source.mkdir()
-    (source / "scan.pdf").write_bytes(b"%PDF")
+    outside.mkdir()
+    (outside / "scan.pdf").write_bytes(b"%PDF")
     md = drafts / "d.md"
     md.write_text(
         "---\nTo: a@b.com\nSubject: x\n"
-        "Attach: ../../_source_files/scan.pdf\n---\n\nhi\n",
+        "Attach: ../../../outside/scan.pdf\n---\n\nhi\n",
         encoding="utf-8",
     )
     result = compose_draft(md)
     assert result["ok"] is False
-    assert "attachment" in result["error"].lower() or "relative" in result["error"].lower()
+    assert "project" in result["error"].lower()
 
 
 def test_missing_attach_still_opens_mail(tmp_path: Path) -> None:

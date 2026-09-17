@@ -114,6 +114,8 @@ struct ExportJob: Identifiable, Equatable, Codable {
     var id: String
     var name: String
     var outputDir: String
+    /// Case-file root (parent of Email/). Empty means infer from outputDir.
+    var projectDir: String?
     /// How groups combine: typically "all" → (group1) AND (group2)
     var conjunction: String
     var groups: [MatchGroup]
@@ -126,13 +128,14 @@ struct ExportJob: Identifiable, Equatable, Codable {
     var bookmark: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, outputDir, match, includeSent, includeBin, includeThread, mailRoot, bookmark
+        case id, name, outputDir, projectDir, match, includeSent, includeBin, includeThread, mailRoot, bookmark
     }
 
     init(
         id: String = UUID().uuidString,
-        name: String = "New Export",
+        name: String = "New Project",
         outputDir: String = "",
+        projectDir: String? = nil,
         conjunction: String = "all",
         groups: [MatchGroup] = [MatchGroup()],
         includeSent: Bool = true,
@@ -144,6 +147,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         self.id = id
         self.name = name
         self.outputDir = outputDir
+        self.projectDir = projectDir
         self.conjunction = conjunction
         self.groups = groups
         self.includeSent = includeSent
@@ -158,6 +162,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         name = try c.decode(String.self, forKey: .name)
         outputDir = try c.decode(String.self, forKey: .outputDir)
+        projectDir = try c.decodeIfPresent(String.self, forKey: .projectDir)
         includeSent = try c.decodeIfPresent(Bool.self, forKey: .includeSent) ?? true
         includeBin = try c.decodeIfPresent(Bool.self, forKey: .includeBin) ?? false
         includeThread = try c.decodeIfPresent(Bool.self, forKey: .includeThread) ?? false
@@ -179,6 +184,9 @@ struct ExportJob: Identifiable, Equatable, Codable {
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(outputDir, forKey: .outputDir)
+        if let projectDir, !projectDir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try c.encode(projectDir, forKey: .projectDir)
+        }
         try c.encode(includeSent, forKey: .includeSent)
         try c.encode(includeBin, forKey: .includeBin)
         try c.encode(includeThread, forKey: .includeThread)
@@ -765,7 +773,10 @@ final class JobsStore: ObservableObject {
             }
         }
         if regularFiles.isEmpty { return true }
-        if regularFiles.count == 1 && regularFiles.first?.lastPathComponent == "_how_to_use.md" { return true }
+        let names = Set(regularFiles.map(\.lastPathComponent))
+        if names.isSubset(of: [ProjectLayout.howToFile, ProjectLayout.legacyHowToFile, ProjectLayout.statusFile]) {
+            return true
+        }
         return false
     }
 
@@ -813,7 +824,7 @@ final class JobsStore: ObservableObject {
         }
     }
 
-    /// Prepares subdirectories (Drafts, Sent) and writes _how_to_use.md inside confirmed export folder before export.
+    /// Prepares the case-file layout and writes how_to_use.md before export.
     func prepareOutputDirectory(for job: ExportJob) throws {
         let raw = job.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
@@ -831,13 +842,11 @@ final class JobsStore: ObservableObject {
         } else {
             try fm.createDirectory(atPath: path, withIntermediateDirectories: true)
         }
-        for sub in ["Drafts", "Sent"] {
-            try fm.createDirectory(
-                atPath: (path as NSString).appendingPathComponent(sub),
-                withIntermediateDirectories: true
-            )
-        }
-        writeHowToUse(in: path, mailboxName: job.name)
+        let projectPath = (job.projectDir?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? ProjectLayout.inferProjectRoot(from: path)
+        let projectURL = URL(fileURLWithPath: (projectPath as NSString).expandingTildeInPath)
+        try ProjectLayout.ensure(at: projectURL, mailboxName: job.name)
+        writeHowToUse(in: path, mailboxName: job.name, projectDir: projectURL.path)
     }
 
     /// Refresh the bookmark for a job from its current outputDir on disk if the directory exists.
@@ -944,9 +953,13 @@ final class JobsStore: ObservableObject {
                 let candidate = base.appendingPathComponent(name)
                 var isDir: ObjCBool = false
                 if fm.fileExists(atPath: candidate.path, isDirectory: &isDir), isDir.boolValue {
-                    let subTarget = candidate.appendingPathComponent("Email/From Mac Mail")
-                    if fm.fileExists(atPath: subTarget.path, isDirectory: &isDir), isDir.boolValue {
-                        return subTarget
+                    let email = candidate.appendingPathComponent(ProjectLayout.emailDir)
+                    if fm.fileExists(atPath: email.path, isDirectory: &isDir), isDir.boolValue {
+                        return email
+                    }
+                    let legacy = candidate.appendingPathComponent("From Mac Mail")
+                    if fm.fileExists(atPath: legacy.path, isDirectory: &isDir), isDir.boolValue {
+                        return legacy
                     }
                     return candidate
                 }
@@ -977,7 +990,7 @@ final class JobsStore: ObservableObject {
         save()
     }
 
-    /// Rewrite `_how_to_use.md` in every export folder that exists on this Mac.
+    /// Rewrite `how_to_use.md` in every project that exists on this Mac.
     /// Skips missing / moved / Trash folders. Identical files are left untouched.
     func syncHowToUseToAllJobs() {
         for job in jobs {
@@ -987,18 +1000,21 @@ final class JobsStore: ObservableObject {
 
     private func writeHowToUseIfFolderExists(_ job: ExportJob) {
         guard case .exists(let url) = folderStatus(for: job) else { return }
-        writeHowToUse(in: url.path, mailboxName: job.name)
+        let project = (job.projectDir?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? ProjectLayout.inferProjectRoot(from: url.path)
+        writeHowToUse(in: url.path, mailboxName: job.name, projectDir: project)
     }
 
-    private func writeHowToUse(in folderPath: String, mailboxName: String) {
-        let dest = URL(fileURLWithPath: folderPath)
-            .appendingPathComponent("_how_to_use.md")
+    private func writeHowToUse(in folderPath: String, mailboxName: String, projectDir: String? = nil) {
+        let emailURL = URL(fileURLWithPath: folderPath)
+        let projectPath = projectDir ?? ProjectLayout.inferProjectRoot(from: folderPath)
+        let dest = URL(fileURLWithPath: projectPath).appendingPathComponent(ProjectLayout.howToFile)
         var template: String
         let bundled = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Resources/_how_to_use.md")
+            .appendingPathComponent("Contents/Resources/\(ProjectLayout.howToFile)")
         if let text = try? String(contentsOf: bundled, encoding: .utf8) {
             template = text
-        } else if let url = Bundle.main.url(forResource: "_how_to_use", withExtension: "md"),
+        } else if let url = Bundle.main.url(forResource: "how_to_use", withExtension: "md"),
                   let text = try? String(contentsOf: url, encoding: .utf8)
         {
             template = text
@@ -1008,25 +1024,56 @@ final class JobsStore: ObservableObject {
         let body = template
             .replacingOccurrences(of: "{{MAILBOX_NAME}}", with: mailboxName)
             .replacingOccurrences(of: "{{OUTPUT_DIR}}", with: folderPath)
+            .replacingOccurrences(of: "{{PROJECT_DIR}}", with: projectPath)
         if let existing = try? String(contentsOf: dest, encoding: .utf8), existing == body {
+            removeLegacyHowTo(in: emailURL)
+            removeLegacyHowTo(in: URL(fileURLWithPath: projectPath))
             return
         }
+        try? FileManager.default.createDirectory(
+            at: dest.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         try? body.write(to: dest, atomically: true, encoding: .utf8)
+        removeLegacyHowTo(in: emailURL)
+        removeLegacyHowTo(in: URL(fileURLWithPath: projectPath))
+    }
+
+    private func removeLegacyHowTo(in folder: URL) {
+        let stale = folder.appendingPathComponent(ProjectLayout.legacyHowToFile)
+        try? FileManager.default.removeItem(at: stale)
     }
 
     private static let fallbackHowToTemplate = """
-    # MailExporter — how to use this folder
+    # {{MAILBOX_NAME}}
 
-    This folder holds exported Apple Mail messages (`*.eml`) for AI admin context.
-    Write Markdown drafts in `{{OUTPUT_DIR}}/Drafts` as `NNN_who_subject.md`.
-    After an exported `.eml` shows the mail was sent, MailExporter can move that file to `{{OUTPUT_DIR}}/Sent`.
-
-    Use the installed helper MCP (`MailExporterEngine mcp`):
-    `list_jobs`, `list_messages`, `read_message`, `list_drafts`, `compose_draft`, `check_matches`, `export_job`.
-    Never send mail. Never invent email content.
+    Read `how_to_use.md` and `STATUS.md`, then the `.eml` files in `{{OUTPUT_DIR}}`.
+    Ask the owner for more background, or what to do next. Never send mail.
     """
 
-    /// Insert or replace a job and write `jobs.json`. Refreshes `_how_to_use.md` if the folder exists.
+    func createProject(named name: String, parent: String) throws -> ExportJob {
+        if isForbiddenOutputDir(parent) {
+            throw NSError(
+                domain: "MailExporter",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "That folder can’t be used as a project parent."]
+            )
+        }
+        let created = try ProjectLayout.createProject(name: name, parent: parent)
+        UserDefaults.standard.set(parent, forKey: "lastProjectParent")
+        var job = ExportJob(name: name)
+        applyFolderToJob(&job, url: created.email)
+        job.projectDir = created.project.path
+        job.outputDir = created.email.path
+        writeHowToUse(
+            in: created.email.path,
+            mailboxName: name,
+            projectDir: created.project.path
+        )
+        return job
+    }
+
+    /// Insert or replace a job and write `jobs.json`. Refreshes `how_to_use.md` if the folder exists.
     func upsertJob(_ job: ExportJob) {
         if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
             jobs[idx] = job
@@ -1062,9 +1109,25 @@ final class JobsStore: ObservableObject {
         return url
     }
 
+    func lastProjectParent() -> String {
+        let stored = UserDefaults.standard.string(forKey: "lastProjectParent") ?? ""
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return ProjectLayout.defaultParent
+    }
+
     func applyFolderToJob(_ job: inout ExportJob, url: URL) {
-        job.outputDir = url.path
-        if let data = try? url.bookmarkData(
+        var email = url
+        if url.lastPathComponent != ProjectLayout.emailDir {
+            let nested = url.appendingPathComponent(ProjectLayout.emailDir)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: nested.path, isDirectory: &isDir), isDir.boolValue {
+                email = nested
+            }
+        }
+        job.outputDir = email.path
+        job.projectDir = ProjectLayout.inferProjectRoot(from: email.path)
+        if let data = try? email.bookmarkData(
             options: .minimalBookmark,
             includingResourceValuesForKeys: nil,
             relativeTo: nil

@@ -65,6 +65,26 @@ def test_parse_job_requires_output_dir() -> None:
         parse_job({"name": "X", "match": {"all": [{"field": "subject", "op": "contains", "values": ["a"]}]}})
 
 
+def test_parse_job_keeps_project_dir(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    email = project / "Email"
+    job = parse_job(
+        {
+            "name": "Claim",
+            "outputDir": str(email),
+            "projectDir": str(project),
+            "match": {
+                "conjunction": "any",
+                "conditions": [
+                    {"field": "entire", "op": "contains", "values": ["hello"]}
+                ],
+            },
+        }
+    )
+    assert job.project_dir == str(project)
+    assert job.to_dict()["projectDir"] == str(project)
+
+
 def test_parse_job_defaults() -> None:
     job = parse_job(
         {

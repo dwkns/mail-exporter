@@ -26,6 +26,7 @@ from engine.compose_draft import compose_markdown_text  # noqa: E402
 from engine.criteria import parse_match  # noqa: E402
 from engine.howto import DRAFTS_SUBDIR, HOW_TO_FILENAME, SENT_SUBDIR, sync_how_to_all, write_how_to  # noqa: E402
 from engine.jobs import Job, JobsFile, default_jobs_path, load_jobs, save_jobs  # noqa: E402
+from engine.project import LEGACY_HOWTO, infer_project_root  # noqa: E402
 
 mcp = FastMCP("mail-exporter")
 
@@ -95,7 +96,14 @@ def _assert_clearable_export_folder(folder: Path) -> None:
         raise ValueError(f"folder missing: {folder}")
     marker = folder / _EXPORT_MARKER
     howto = folder / HOW_TO_FILENAME
-    if not marker.is_file() and not howto.is_file():
+    legacy = folder / LEGACY_HOWTO
+    parent_howto = folder.parent / HOW_TO_FILENAME
+    if (
+        not marker.is_file()
+        and not howto.is_file()
+        and not legacy.is_file()
+        and not parent_howto.is_file()
+    ):
         raise ValueError(
             f"refusing to clear {folder}: not a MailExporter export folder "
             f"(missing {_EXPORT_MARKER} or {HOW_TO_FILENAME})"
@@ -474,7 +482,7 @@ def clear_target(job_name: str = "", job_id: str = "") -> str:
     """Delete all .eml files and .exported-ids.json in a job's export folder.
 
     Only runs when the folder is a configured job outputDir and contains
-    MailExporter markers (_how_to_use.md or .exported-ids.json).
+    MailExporter markers (how_to_use.md or .exported-ids.json).
     """
     try:
         job = _find_job(job_id=job_id or None, job_name=job_name or None)
@@ -503,7 +511,7 @@ def clear_target(job_name: str = "", job_id: str = "") -> str:
 
 @mcp.tool()
 def write_howto(job_name: str = "", job_id: str = "") -> str:
-    """Create or refresh `_how_to_use.md`. With no job, rewrite every export folder."""
+    """Create or refresh `how_to_use.md`. With no job, rewrite every project folder."""
     if not job_name.strip() and not job_id.strip():
         jobs = load_jobs(_config_path()).jobs
         paths = sync_how_to_all(jobs)
@@ -521,7 +529,7 @@ def write_howto(job_name: str = "", job_id: str = "") -> str:
 
 
 def _job_row(j: Job) -> dict[str, Any]:
-    return {
+    row: dict[str, Any] = {
         "id": j.id,
         "name": j.name,
         "outputDir": j.output_dir,
@@ -529,6 +537,9 @@ def _job_row(j: Job) -> dict[str, Any]:
         "includeBin": j.include_bin,
         "includeThread": j.include_thread,
     }
+    if j.project_dir:
+        row["projectDir"] = j.project_dir
+    return row
 
 
 @mcp.tool()
@@ -609,6 +620,7 @@ def create_job(
         include_sent=include_sent,
         include_bin=include_bin,
         include_thread=include_thread,
+        project_dir=str(infer_project_root(Path(output_dir))),
     )
     jobs.jobs.append(job)
     save_jobs(jobs, path)
