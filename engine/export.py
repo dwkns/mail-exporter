@@ -119,8 +119,13 @@ def collect_matches(
     by_id: dict[str, tuple[Path, bytes, int]] = {}
     t0 = time.perf_counter()
     if candidates is None:
+        mail_root = None
+        raw_root = job.extra.get("mailRoot")
+        if isinstance(raw_root, str) and raw_root.strip():
+            mail_root = Path(raw_root).expanduser()
         candidates = candidate_paths(
             job.match,
+            mail_root,
             include_sent=job.include_sent,
             include_bin=job.include_bin,
             timings=timings,

@@ -6,6 +6,7 @@ private struct SessionExportResult {
     var summary: String
     var detail: String
     var durationSeconds: TimeInterval?
+    var newlyWritten: Int? = nil
 }
 
 private enum DurationFormat {
@@ -470,7 +471,8 @@ struct RunView: View {
         sessionResults[jobID] = SessionExportResult(
             summary: summary.text,
             detail: result.rawJSON.isEmpty ? result.line : result.rawJSON,
-            durationSeconds: nil
+            durationSeconds: nil,
+            newlyWritten: summary.newlyWritten
         )
     }
 
@@ -492,7 +494,7 @@ struct RunView: View {
                         newlyWritten: 0
                     )
                 }
-                if let n = item["newlyWritten"] as? Int {
+                if let n = Self.jsonInt(item["newlyWritten"]) {
                     if n == 0 { return RowSummary(text: "Up to date", newlyWritten: 0) }
                     return RowSummary(text: n == 1 ? "1 new" : "\(n) new", newlyWritten: n)
                 }
@@ -507,6 +509,12 @@ struct RunView: View {
             if !after.isEmpty { line = after }
         }
         return RowSummary(text: line, newlyWritten: nil)
+    }
+
+    private static func jsonInt(_ value: Any?) -> Int? {
+        if let n = value as? Int { return n }
+        if let n = value as? NSNumber { return n.intValue }
+        return nil
     }
 
     private func recordDuration(_ duration: TimeInterval, jobID: String?) {
@@ -566,7 +574,8 @@ struct RunView: View {
                 sessionResults[id] = SessionExportResult(
                     summary: summary.text,
                     detail: pieceJSON,
-                    durationSeconds: focusedJobID == id ? duration : nil
+                    durationSeconds: focusedJobID == id ? duration : nil,
+                    newlyWritten: summary.newlyWritten
                 )
             }
             return
@@ -577,7 +586,8 @@ struct RunView: View {
             sessionResults[focusedJobID] = SessionExportResult(
                 summary: summary.text,
                 detail: result.rawJSON.isEmpty ? result.line : result.rawJSON,
-                durationSeconds: duration
+                durationSeconds: duration,
+                newlyWritten: summary.newlyWritten
             )
         }
     }
@@ -662,8 +672,13 @@ private struct ExportJobRow: View {
         }
     }
 
+    private var isNewCount: Bool {
+        !isRunningThis && (result?.newlyWritten ?? 0) > 0
+    }
+
     private var statusColor: Color {
         if isRunningThis { return .secondary }
+        if isNewCount { return Color(nsColor: .systemGreen) }
         switch folderStatus {
         case .exists, .unset:
             return .secondary
@@ -725,13 +740,13 @@ private struct ExportJobRow: View {
 
                         if let statusText {
                             Text(statusText)
-                                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                                .font(.system(size: 12, weight: isNewCount ? .bold : .medium).monospacedDigit())
                                 .foregroundStyle(statusColor)
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
                         }
 
-                        if result != nil, !isRunningThis {
+                        if debugMode, result != nil, !isRunningThis {
                             detailsButton
                         }
                     }

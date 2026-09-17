@@ -120,11 +120,13 @@ struct ExportJob: Identifiable, Equatable, Codable {
     var includeSent: Bool
     var includeBin: Bool
     var includeThread: Bool
+    /// Optional scan root for synthetic / test mailboxes. Empty means ~/Library/Mail.
+    var mailRoot: String?
     /// Base64-encoded URL bookmark data to track moved or renamed folders on disk
     var bookmark: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, outputDir, match, includeSent, includeBin, includeThread, bookmark
+        case id, name, outputDir, match, includeSent, includeBin, includeThread, mailRoot, bookmark
     }
 
     init(
@@ -136,6 +138,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         includeSent: Bool = true,
         includeBin: Bool = false,
         includeThread: Bool = false,
+        mailRoot: String? = nil,
         bookmark: String? = nil
     ) {
         self.id = id
@@ -146,6 +149,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         self.includeSent = includeSent
         self.includeBin = includeBin
         self.includeThread = includeThread
+        self.mailRoot = mailRoot
         self.bookmark = bookmark
     }
 
@@ -157,6 +161,7 @@ struct ExportJob: Identifiable, Equatable, Codable {
         includeSent = try c.decodeIfPresent(Bool.self, forKey: .includeSent) ?? true
         includeBin = try c.decodeIfPresent(Bool.self, forKey: .includeBin) ?? false
         includeThread = try c.decodeIfPresent(Bool.self, forKey: .includeThread) ?? false
+        mailRoot = try c.decodeIfPresent(String.self, forKey: .mailRoot)
         bookmark = try c.decodeIfPresent(String.self, forKey: .bookmark)
         // Ignore legacy lastRunSummary / lastRunDetail — export feedback is session-only.
 
@@ -177,6 +182,9 @@ struct ExportJob: Identifiable, Equatable, Codable {
         try c.encode(includeSent, forKey: .includeSent)
         try c.encode(includeBin, forKey: .includeBin)
         try c.encode(includeThread, forKey: .includeThread)
+        if let mailRoot, !mailRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try c.encode(mailRoot, forKey: .mailRoot)
+        }
         try c.encodeIfPresent(bookmark, forKey: .bookmark)
         try c.encode(
             MatchPayload(conjunction: conjunction, groups: groups),
