@@ -216,6 +216,33 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_write_howto(args: argparse.Namespace) -> int:
+    from engine.howto import sync_how_to_all, write_how_to
+    from engine.jobs import load_jobs
+
+    jobs = load_jobs(config_path(args.config)).jobs
+    if args.job_id or args.job_name:
+        needle_id = (args.job_id or "").strip()
+        needle_name = (args.job_name or "").strip().lower()
+        match = None
+        for job in jobs:
+            if needle_id and job.id == needle_id:
+                match = job
+                break
+            if needle_name and job.name.lower() == needle_name:
+                match = job
+                break
+        if match is None:
+            print("error: job not found", file=sys.stderr)
+            return 1
+        path = write_how_to(Path(match.output_dir).expanduser(), mailbox_name=match.name)
+        print(json.dumps({"wrote": str(path), "job": match.name}))
+        return 0
+    paths = sync_how_to_all(jobs)
+    print(json.dumps({"wrote": [str(p) for p in paths], "count": len(paths)}))
+    return 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     if args.config:
         os.environ["MAILEXPORTER_CONFIG"] = str(config_path(args.config))
@@ -258,6 +285,14 @@ def add_common_subcommands(sub: argparse._SubParsersAction) -> None:
 
     p_mcp = sub.add_parser("mcp", help="Run local MailExporter MCP server (stdio)")
     p_mcp.set_defaults(func=cmd_mcp)
+
+    p_ht = sub.add_parser(
+        "write-howto",
+        help="Rewrite _how_to_use.md in every export folder (or one job)",
+    )
+    p_ht.add_argument("--job-id", help="One job by id")
+    p_ht.add_argument("--job-name", help="One job by name")
+    p_ht.set_defaults(func=cmd_write_howto)
 
 
 def build_parser() -> argparse.ArgumentParser:

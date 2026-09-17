@@ -53,7 +53,7 @@ Each export folder looks like this (MailExporter creates `Drafts/` and `Sent/`):
 <outputDir>/
   *.eml                 exported messages
   .exported-ids.json    incremental state — do not delete unless a full re-export
-  _how_to_use.md        notes for an AI assistant
+  _how_to_use.md        notes for an AI assistant (rewritten when the app's guide changes)
   Attachments/<id>/     files extracted next to the `.eml`
   Drafts/               Markdown the AI writes before the mail is known to be sent
   Sent/                 those Markdown files after a sent copy appears in the export
@@ -150,7 +150,7 @@ PYTHONPATH="$(pwd)" .venv/bin/python -m mailexporter_mcp
 | `check_matches` | Dry-run: how many Mail messages currently match |
 | `export_job` | Refresh the folder from Apple Mail (incremental unless `force_full`) |
 | `clear_target` | Delete exported `.eml` files (debug / full redo) |
-| `write_howto` | Refresh `_how_to_use.md` in the export folder |
+| `write_howto` | Refresh `_how_to_use.md` in one folder, or every export folder if no job is given |
 
 Typical flow: `list_jobs` → `list_messages` / `read_message` → write a numbered `.md` in `Drafts/` → `compose_draft` → `export_job` later. Matching Markdown moves to `Sent/` once a sent copy is in the export.
 

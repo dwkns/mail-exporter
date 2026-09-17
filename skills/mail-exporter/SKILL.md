@@ -41,6 +41,8 @@ Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`
   Sent/
 ```
 
+`write_howto` with no job rewrites `_how_to_use.md` in every export folder. MailExporter also does this on launch when the bundled guide changed, so “re-read the instructions” picks up the latest copy.
+
 After the owner sends, the next export can move matching Markdown from `Drafts/` to `Sent/` (job must include Sent). IMAP/Gmail drafts Mail creates may upload — “never sends” is not “never leaves this Mac.”
 
 ## Permissions

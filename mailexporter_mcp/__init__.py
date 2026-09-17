@@ -23,7 +23,7 @@ if str(_REPO) not in sys.path:
 from engine.compose_draft import compose_draft as _compose_draft  # noqa: E402
 from engine.compose_draft import compose_markdown_text  # noqa: E402
 from engine.criteria import parse_match  # noqa: E402
-from engine.howto import DRAFTS_SUBDIR, HOW_TO_FILENAME, SENT_SUBDIR, write_how_to  # noqa: E402
+from engine.howto import DRAFTS_SUBDIR, HOW_TO_FILENAME, SENT_SUBDIR, sync_how_to_all, write_how_to  # noqa: E402
 from engine.jobs import Job, JobsFile, default_jobs_path, load_jobs, save_jobs  # noqa: E402
 
 mcp = FastMCP("mail-exporter")
@@ -454,7 +454,18 @@ def clear_target(job_name: str = "", job_id: str = "") -> str:
 
 @mcp.tool()
 def write_howto(job_name: str = "", job_id: str = "") -> str:
-    """Create or refresh `_how_to_use.md` in a job's export folder."""
+    """Create or refresh `_how_to_use.md`. With no job, rewrite every export folder."""
+    if not job_name.strip() and not job_id.strip():
+        jobs = load_jobs(_config_path()).jobs
+        paths = sync_how_to_all(jobs)
+        return json.dumps(
+            {
+                "ok": True,
+                "wrote": [str(p) for p in paths],
+                "count": len(paths),
+            },
+            indent=2,
+        )
     job = _find_job(job_id=job_id or None, job_name=job_name or None)
     path = write_how_to(Path(job.output_dir), mailbox_name=job.name)
     return json.dumps({"wrote": str(path), "job": job.name}, indent=2)
