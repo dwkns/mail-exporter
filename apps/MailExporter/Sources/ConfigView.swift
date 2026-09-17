@@ -99,7 +99,7 @@ struct JobEditorSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                Button("Save") {
+                Button(presentation.isAdd ? "Save & Export" : "Save") {
                     saveDraft()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -150,7 +150,7 @@ struct JobEditorSheet: View {
             if JobsStore.isForbiddenOutputDir(projectParent) {
                 return "Choose a parent folder that is not / or inside ~/Library/Mail"
             }
-            return "Create the project folder and save the rules"
+            return "Create the project folder, save the rules, and export matching mail"
         }
         if JobsStore.isForbiddenOutputDir(draft.outputDir) {
             return "Choose a folder that is not / or inside ~/Library/Mail"
@@ -171,6 +171,13 @@ struct JobEditorSheet: View {
                 next.bookmark = created.bookmark
                 store.upsertJob(next)
                 dismiss()
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .mailExporterExportJob,
+                        object: nil,
+                        userInfo: ["id": next.id, "name": next.name]
+                    )
+                }
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Couldn’t create the project folder"
@@ -374,7 +381,7 @@ struct SmartMailboxEditor: View {
                 }
                 HStack(alignment: .firstTextBaseline) {
                     Spacer().frame(width: 150)
-                    Text("Creates \(createdProjectPath) with Email, Documents, Notes, _archive, STATUS.md, and how_to_use.md. Export, then tell the AI to read that folder.")
+                    Text("Creates \(createdProjectPath) with Email, Documents, Notes, _archive, STATUS.md, and how_to_use.md. Saving runs the first export. Then tell the AI to read that folder.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
