@@ -1,0 +1,10 @@
+{
+  "email_dir": "Email",
+  "documents_dir": "Documents",
+  "notes_dir": "Notes",
+  "archive_dir": "_archive",
+  "status_filename": "STATUS.md",
+  "howto_filename": "how_to_use.md",
+  "legacy_howto_filename": "_how_to_use.md",
+  "default_parent_segments": ["Desktop"]
+}

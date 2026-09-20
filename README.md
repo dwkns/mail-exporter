@@ -47,7 +47,7 @@ Jobs are stored in the private iCloud container `iCloud.com.dwkns.MailExporter` 
 
 CLI and MCP follow the same file the app last wrote (pointer at `~/Library/Application Support/MailExporter/jobs-location`).
 
-Each **project** looks like this. **New Project** creates the folder; the first export fills `Email/`. Then tell an AI to read that folder — `how_to_use.md` tells it to gather context and ask for more background, or what to do next.
+Each **project** looks like this. **New Project** creates it under `~/Desktop` by default (or the last parent you chose), then the first export fills `Email/`. Tell an AI to read that folder — `how_to_use.md` tells it to gather context and ask for more background, or what to do next.
 
 ```text
 <project>/
