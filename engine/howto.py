@@ -11,13 +11,14 @@ from pathlib import Path
 
 from engine.project import (
     EMAIL_DIR,
+    HOWTO_FILENAME,
     LEGACY_HOWTO,
     ensure_project_layout,
     infer_project_root,
     remove_legacy_howto,
 )
 
-HOW_TO_FILENAME = "how_to_use.md"
+HOW_TO_FILENAME = HOWTO_FILENAME
 DRAFTS_SUBDIR = "Drafts"
 SENT_SUBDIR = "Sent"
 

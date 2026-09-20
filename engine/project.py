@@ -2,15 +2,44 @@
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
-EMAIL_DIR = "Email"
-DOCUMENTS_DIR = "Documents"
-NOTES_DIR = "Notes"
-ARCHIVE_DIR = "_archive"
-STATUS_FILENAME = "STATUS.md"
-LEGACY_HOWTO = "_how_to_use.md"
+_REPO_SHARED = Path(__file__).resolve().parents[1] / "shared" / "project_layout.json"
+_PACKAGE_SHARED = Path(__file__).resolve().with_name("project_layout.json")
+
+
+@lru_cache(maxsize=1)
+def _layout() -> dict[str, object]:
+    for path in (_PACKAGE_SHARED, _REPO_SHARED):
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    # Frozen / missing-file fallback — keep in sync with shared/project_layout.json.
+    return {
+        "email_dir": "Email",
+        "documents_dir": "Documents",
+        "notes_dir": "Notes",
+        "archive_dir": "_archive",
+        "status_filename": "STATUS.md",
+        "howto_filename": "how_to_use.md",
+        "legacy_howto_filename": "_how_to_use.md",
+        "default_parent_segments": ["Desktop"],
+    }
+
+
+def _str(key: str) -> str:
+    return str(_layout()[key])
+
+
+EMAIL_DIR = _str("email_dir")
+DOCUMENTS_DIR = _str("documents_dir")
+NOTES_DIR = _str("notes_dir")
+ARCHIVE_DIR = _str("archive_dir")
+STATUS_FILENAME = _str("status_filename")
+HOWTO_FILENAME = _str("howto_filename")
+LEGACY_HOWTO = _str("legacy_howto_filename")
 
 
 def sanitized_folder_name(name: str) -> str:
@@ -21,7 +50,17 @@ def sanitized_folder_name(name: str) -> str:
 
 
 def default_parent() -> Path:
-    return Path.home() / "Desktop" / "home"
+    """First-run parent when the caller does not pass one (CLI / tests).
+
+    The Mac app remembers the last chosen parent in UserDefaults; this Desktop
+    default is only the portable fallback (not a personal nested path).
+    """
+    segments = _layout()["default_parent_segments"]
+    assert isinstance(segments, list)
+    path = Path.home()
+    for part in segments:
+        path = path / str(part)
+    return path
 
 
 def infer_project_root(path: Path) -> Path:

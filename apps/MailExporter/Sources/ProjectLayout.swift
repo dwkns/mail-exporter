@@ -1,5 +1,7 @@
 import Foundation
 
+/// Case-file folder names. Keep in sync with `shared/project_layout.json`
+/// (enforced by `tests/test_project_layout_parity.py`).
 enum ProjectLayout {
     static let emailDir = "Email"
     static let documentsDir = "Documents"
@@ -9,8 +11,10 @@ enum ProjectLayout {
     static let howToFile = "how_to_use.md"
     static let legacyHowToFile = "_how_to_use.md"
 
+    /// First-run parent for New Project when nothing is remembered yet.
+    /// Prefer the user's Desktop; `lastProjectParent` overrides after the first save.
     static var defaultParent: String {
-        (NSHomeDirectory() as NSString).appendingPathComponent("Desktop/home")
+        (NSHomeDirectory() as NSString).appendingPathComponent("Desktop")
     }
 
     static func sanitizedFolderName(_ name: String) -> String {

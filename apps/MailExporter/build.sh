@@ -386,6 +386,10 @@ swiftc \
   -parse-as-library
 
 echo "Bundling Python engine (PyInstaller onedir — fast startup)…"
+# Keep the frozen engine's layout JSON in sync with the shared source of truth.
+mkdir -p "${REPO}/engine"
+cp "${REPO}/shared/project_layout.json" "${REPO}/engine/project_layout.json"
+
 "${VENV}/bin/pyinstaller" \
   --noconfirm \
   --clean \
@@ -398,6 +402,7 @@ echo "Bundling Python engine (PyInstaller onedir — fast startup)…"
   --console \
   --hidden-import mailexporter_mcp \
   --collect-all mcp \
+  --add-data "${REPO}/engine/project_layout.json:engine" \
   "${ROOT}/engine_entry.py"
 
 mkdir -p "${HELPER_DIR}"
