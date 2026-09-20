@@ -47,16 +47,21 @@ Jobs are stored in the private iCloud container `iCloud.com.dwkns.MailExporter` 
 
 CLI and MCP follow the same file the app last wrote (pointer at `~/Library/Application Support/MailExporter/jobs-location`).
 
-Each export folder looks like this (MailExporter creates `Drafts/` and `Sent/`):
+Each **project** looks like this. **New Project** creates the folder; the first export fills `Email/`. Then tell an AI to read that folder — `how_to_use.md` tells it to gather context and ask for more background, or what to do next.
 
 ```text
-<outputDir>/
-  *.eml                 exported messages
-  .exported-ids.json    incremental state — do not delete unless a full re-export
-  _how_to_use.md        notes for an AI assistant (rewritten when the app's guide changes)
-  Attachments/<id>/     files extracted next to the `.eml`
-  Drafts/               Markdown the AI writes before the mail is known to be sent
-  Sent/                 those Markdown files after a sent copy appears in the export
+<project>/
+  how_to_use.md         notes for an AI assistant (rewritten when the app's guide changes)
+  STATUS.md             where the case stands
+  Email/                MailExporter output (do not dump other files here)
+    *.eml
+    .exported-ids.json  incremental state — do not delete unless a full re-export
+    Attachments/<id>/   files extracted from those emails
+    Drafts/             Markdown the AI writes before the mail is known to be sent
+    Sent/               those Markdown files after a sent copy appears in the export
+  Documents/            papers the owner keeps (policy, invoice, letter)
+  Notes/                timeline, call log, analysis
+  _archive/             superseded packs
 ```
 
 ## Engine CLI
@@ -150,7 +155,7 @@ PYTHONPATH="$(pwd)" .venv/bin/python -m mailexporter_mcp
 | `check_matches` | Dry-run: how many Mail messages currently match |
 | `export_job` | Refresh the folder from Apple Mail. Pass `job_name` (or `job_id`). Incremental unless `force_full` is true; both extras may be omitted. |
 | `clear_target` | Delete exported `.eml` files (debug / full redo) |
-| `write_howto` | Refresh `_how_to_use.md` in one folder, or every export folder if no job is given |
+| `write_howto` | Refresh `how_to_use.md` in one project, or every project if no job is given |
 
 Typical flow: `list_jobs` → `list_messages` / `read_message` → write a numbered `.md` in `Drafts/` → `compose_draft` → `export_job` later. Matching Markdown moves to `Sent/` once a sent copy is in the export.
 
@@ -177,7 +182,7 @@ Examples: `001_supplier_inquiry.md`, `014_contractor_quote.md`.
 
 Keep the same filename when moving `Drafts/` → `Sent/`. Move (do not copy or delete) only when an exported `.eml` matches To / Subject / thread — the job must include Sent mail. If it is unclear, leave the file in `Drafts/`.
 
-Details and the Markdown front-matter format are in `_how_to_use.md` inside each export folder.
+Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project (prefer `Documents/…`).
 
 ---
 

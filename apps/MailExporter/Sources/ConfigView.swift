@@ -19,8 +19,8 @@ enum JobEditorPresentation: Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .add: return "New Export"
-        case .edit: return "Edit Export"
+        case .add: return "New Project"
+        case .edit: return "Edit Project"
         }
     }
 }
@@ -31,6 +31,7 @@ struct JobEditorSheet: View {
 
     let presentation: JobEditorPresentation
     @State private var draft: ExportJob
+    @State private var projectParent: String
     @State private var previewText: String = ""
     @State private var busy = false
     @State private var elapsedSeconds: TimeInterval = 0
@@ -42,8 +43,19 @@ struct JobEditorSheet: View {
         self.presentation = presentation
         if let initialJob {
             _draft = State(initialValue: initialJob)
+            if let project = initialJob.projectDir, !project.isEmpty {
+                _projectParent = State(
+                    initialValue: URL(fileURLWithPath: project).deletingLastPathComponent().path
+                )
+            } else {
+                let inferred = ProjectLayout.inferProjectRoot(from: initialJob.outputDir)
+                _projectParent = State(
+                    initialValue: URL(fileURLWithPath: inferred).deletingLastPathComponent().path
+                )
+            }
         } else {
             _draft = State(initialValue: ExportJob())
+            _projectParent = State(initialValue: ProjectLayout.defaultParent)
         }
     }
 
@@ -60,6 +72,8 @@ struct JobEditorSheet: View {
 
             SmartMailboxEditor(
                 job: $draft,
+                isAdd: presentation.isAdd,
+                projectParent: $projectParent,
                 folderStatus: store.folderStatus(for: draft),
                 onUseFoundLocation: { url in
                     applyFolder(url)
@@ -68,7 +82,8 @@ struct JobEditorSheet: View {
                 busy: $busy,
                 elapsedLabel: busy ? Self.formatDuration(elapsedSeconds) : nil,
                 onPreview: { preview() },
-                onBrowse: { browse() }
+                onBrowse: { browse() },
+                onBrowseParent: { browseParent() }
             )
 
             Divider()
@@ -84,7 +99,7 @@ struct JobEditorSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
-                Button("Save") {
+                Button(presentation.isAdd ? "Save & Export" : "Save") {
                     saveDraft()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -95,6 +110,11 @@ struct JobEditorSheet: View {
             .padding(.vertical, 12)
         }
         .frame(minWidth: 720, idealWidth: 780, minHeight: 520, idealHeight: 580)
+        .onAppear {
+            if presentation.isAdd {
+                projectParent = store.lastProjectParent()
+            }
+        }
         .onDisappear { stopTicker() }
         .confirmationDialog(
             "Delete Export?",
@@ -115,13 +135,22 @@ struct JobEditorSheet: View {
 
     private var canSave: Bool {
         let nameOK = !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if presentation.isAdd {
+            return nameOK && !JobsStore.isForbiddenOutputDir(projectParent)
+        }
         let folder = store.folderStatus(for: draft)
         return nameOK && folder.isValidForExport && !JobsStore.isForbiddenOutputDir(draft.outputDir)
     }
 
     private var saveHelp: String {
         if draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Name this export"
+            return "Name this project"
+        }
+        if presentation.isAdd {
+            if JobsStore.isForbiddenOutputDir(projectParent) {
+                return "Choose a parent folder that is not / or inside ~/Library/Mail"
+            }
+            return "Create the project folder, save the rules, and export matching mail"
         }
         if JobsStore.isForbiddenOutputDir(draft.outputDir) {
             return "Choose a folder that is not / or inside ~/Library/Mail"
@@ -129,12 +158,58 @@ struct JobEditorSheet: View {
         if !store.folderStatus(for: draft).isValidForExport {
             return "Choose a real export folder before saving"
         }
-        return "Save this export"
+        return "Save this project"
     }
 
     private func saveDraft() {
+        if presentation.isAdd {
+            do {
+                let created = try store.createProject(named: draft.name, parent: projectParent)
+                var next = draft
+                next.outputDir = created.outputDir
+                next.projectDir = created.projectDir
+                next.bookmark = created.bookmark
+                store.upsertJob(next)
+                dismiss()
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .mailExporterExportJob,
+                        object: nil,
+                        userInfo: ["id": next.id, "name": next.name]
+                    )
+                }
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Couldn’t create the project folder"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+            return
+        }
         store.upsertJob(draft)
         dismiss()
+    }
+
+    private func browseParent() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Projects are created inside this folder"
+        if panel.runModal() == .OK, let url = panel.url {
+            if JobsStore.isForbiddenOutputDir(url.path) {
+                let alert = NSAlert()
+                alert.messageText = "That folder can’t be used"
+                alert.informativeText = "Pick a folder that is not the disk root and not inside ~/Library/Mail."
+                alert.alertStyle = .warning
+                alert.runModal()
+                return
+            }
+            projectParent = url.path
+        }
     }
 
     private func browse() {
@@ -267,6 +342,8 @@ struct JobEditorSheet: View {
 
 struct SmartMailboxEditor: View {
     @Binding var job: ExportJob
+    var isAdd: Bool
+    @Binding var projectParent: String
     var folderStatus: FolderStatus
     var onUseFoundLocation: (URL) -> Void
     @Binding var previewText: String
@@ -274,6 +351,13 @@ struct SmartMailboxEditor: View {
     var elapsedLabel: String?
     var onPreview: () -> Void
     var onBrowse: () -> Void
+    var onBrowseParent: () -> Void
+
+    private var createdProjectPath: String {
+        let parent = (projectParent as NSString).expandingTildeInPath
+        let name = ProjectLayout.sanitizedFolderName(job.name)
+        return (parent as NSString).appendingPathComponent(name)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -284,14 +368,34 @@ struct SmartMailboxEditor: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            HStack(alignment: .firstTextBaseline) {
-                Text("Export Folder:")
-                    .frame(width: 150, alignment: .trailing)
-                TextField("Choose a folder", text: $job.outputDir)
-                    .textFieldStyle(.roundedBorder)
-                Button(action: onBrowse) {
-                    Label("Choose…", systemImage: "folder")
-                        .labelStyle(.trailingIcon)
+            if isAdd {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Create in:")
+                        .frame(width: 150, alignment: .trailing)
+                    TextField("Parent folder", text: $projectParent)
+                        .textFieldStyle(.roundedBorder)
+                    Button(action: onBrowseParent) {
+                        Label("Choose…", systemImage: "folder")
+                            .labelStyle(.trailingIcon)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline) {
+                    Spacer().frame(width: 150)
+                    Text("Creates \(createdProjectPath) with Email, Documents, Notes, _archive, STATUS.md, and how_to_use.md. Saving runs the first export. Then tell the AI to read that folder.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Email folder:")
+                        .frame(width: 150, alignment: .trailing)
+                    TextField("Choose a folder", text: $job.outputDir)
+                        .textFieldStyle(.roundedBorder)
+                    Button(action: onBrowse) {
+                        Label("Choose…", systemImage: "folder")
+                            .labelStyle(.trailingIcon)
+                    }
                 }
             }
 

@@ -68,8 +68,8 @@ struct OpenDraftIntent: AppIntent {
 }
 
 struct NewExportIntent: AppIntent {
-    static var title: LocalizedStringResource = "New Export"
-    static var description = IntentDescription("Open the New Export sheet in MailExporter.")
+    static var title: LocalizedStringResource = "New Project"
+    static var description = IntentDescription("Open the New Project sheet in MailExporter.")
 
     func perform() async throws -> some IntentResult {
         await MainActor.run {
@@ -108,7 +108,7 @@ struct MailExporterShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: NewExportIntent(),
             phrases: ["New export in \(.applicationName)"],
-            shortTitle: "New Export",
+            shortTitle: "New Project",
             systemImageName: "plus"
         )
     }

@@ -1,60 +1,4 @@
-"""Write `how_to_use.md` into project folders for AI assistants.
-
-This module is the only howto generator. The bundled Resources template is the
-same text with ``{{MAILBOX_NAME}}`` / ``{{OUTPUT_DIR}}`` / ``{{PROJECT_DIR}}``
-placeholders.
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
-
-from engine.project import (
-    EMAIL_DIR,
-    LEGACY_HOWTO,
-    ensure_project_layout,
-    infer_project_root,
-    remove_legacy_howto,
-)
-
-HOW_TO_FILENAME = "how_to_use.md"
-DRAFTS_SUBDIR = "Drafts"
-SENT_SUBDIR = "Sent"
-
-
-def ensure_layout(output_dir: Path) -> Path:
-    """Create Email/Drafts/Sent (and the rest of the project if this is Email/)."""
-    output_dir = Path(output_dir).expanduser()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / DRAFTS_SUBDIR).mkdir(exist_ok=True)
-    (output_dir / SENT_SUBDIR).mkdir(exist_ok=True)
-    if output_dir.name == EMAIL_DIR:
-        ensure_project_layout(output_dir.parent)
-    return output_dir
-
-
-def howto_path_for_output(output_dir: Path) -> Path:
-    output_dir = Path(output_dir).expanduser()
-    if output_dir.name == EMAIL_DIR:
-        return output_dir.parent / HOW_TO_FILENAME
-    return output_dir / HOW_TO_FILENAME
-
-
-def how_to_markdown(
-    *,
-    mailbox_name: str = "",
-    output_dir: str = "",
-    project_dir: str = "",
-) -> str:
-    name = (mailbox_name or "this project").strip() or "this project"
-    email = (output_dir or "this folder").strip() or "this folder"
-    project = (project_dir or "").strip()
-    if not project:
-        inferred = infer_project_root(Path(email)) if email not in ("", "this folder") else None
-        project = str(inferred) if inferred else email
-    drafts = f"{email}/{DRAFTS_SUBDIR}"
-    sent = f"{email}/{SENT_SUBDIR}"
-    return f"""# {name}
+# {{MAILBOX_NAME}}
 
 This file is for an AI assistant helping the owner with a long-running email case (complaint, claim, admin, project). MailExporter rewrites it when the app guide changes. Re-read `how_to_use.md` after an update.
 
@@ -74,12 +18,12 @@ Do not draft a reply on the first read unless they already said what they want s
 
 ## Layout
 
-Project: `{project}`  
-Mail export: `{email}`  
-Export job: **{name}**
+Project: `{{PROJECT_DIR}}`  
+Mail export: `{{OUTPUT_DIR}}`  
+Export job: **{{MAILBOX_NAME}}**
 
 ```
-{project}/
+{{PROJECT_DIR}}/
   how_to_use.md           this guide
   STATUS.md               where we are (you keep this current)
   Email/                  MailExporter output (do not dump other files here)
@@ -103,8 +47,8 @@ Write outgoing `.md` in **`Drafts/`**, not `Email/` root.
 
 | Folder | When |
 |--------|------|
-| `{drafts}` | Composing, waiting for the owner to send, or not sure it went out |
-| `{sent}` | After a matching sent `.eml` is in the export |
+| `{{OUTPUT_DIR}}/Drafts` | Composing, waiting for the owner to send, or not sure it went out |
+| `{{OUTPUT_DIR}}/Sent` | After a matching sent `.eml` is in the export |
 
 Filename: `NNN_who_subject.md`
 
@@ -143,13 +87,13 @@ Best regards
 | `Subject` | **Required** for rich formatting in Mail. |
 | `In-Reply-To` | `messageId` from `read_message` (keep angle brackets). Opens a real reply if Mail has that message. |
 | `Reply` | `reply` (default when In-Reply-To is set), `reply-all`, or `new`. |
-| `Attach` | File **inside this project**. Prefer `Documents/…` or `Email/Attachments/<id>/…`. Absolute paths are fine if they stay under `{project}`. Paths outside the project, `~/…` to elsewhere, and `..` that escapes the project are refused. |
+| `Attach` | File **inside this project**. Prefer `Documents/…` or `Email/Attachments/<id>/…`. Absolute paths are fine if they stay under `{{PROJECT_DIR}}`. Paths outside the project, `~/…` to elsewhere, and `..` that escapes the project are refused. |
 | `Format: plain` | Skip Markdown rendering. |
 
 When the owner says “send it”, open an Apple Mail draft (never send):
 
 ```bash
-/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft "{drafts}/NNN_who_subject.md"
+/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft "{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md"
 ```
 
 Same command as `draft`. Dev: `python3 -m engine append-draft path.md`. Or drop the `.md` on MailExporter, or MCP `compose_draft`.
@@ -168,14 +112,14 @@ MailExporter needs **Accessibility** (formatted paste) and **Automation → Mail
 ## MailExporter MCP
 
 ```json
-{{
-  "mcpServers": {{
-    "mail-exporter": {{
+{
+  "mcpServers": {
+    "mail-exporter": {
       "command": "/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine",
       "args": ["mcp"]
-    }}
-  }}
-}}
+    }
+  }
+}
 ```
 
 Or Settings → Advanced → Install mail-exporter MCP.
@@ -190,7 +134,7 @@ Or Settings → Advanced → Install mail-exporter MCP.
 | `compose_draft` | Open Mail draft/reply from Markdown in `Drafts/`. |
 | `check_matches` / `export_job` | Refresh from Apple Mail. Pass `job_name` only; omit `job_id` / `force_full` unless needed. |
 
-Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{drafts}/NNN_who_subject.md` → `append-draft` when they say send it → `export_job` again after they send.
+Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md` → `append-draft` when they say send it → `export_job` again after they send.
 
 ## Ground rules
 
@@ -199,53 +143,3 @@ Typical flow after the first read: `export_job` if mail looks stale → `list_me
 - Stay in **this project folder**. Import outside papers into `Documents/` rather than attaching from Downloads.
 - Never send mail automatically — only open drafts.
 - Keep unsent Markdown in `Drafts/`. Update `STATUS.md` when the picture changes.
-"""
-
-
-def how_to_template() -> str:
-    """Placeholder form copied into ``apps/MailExporter/Resources/how_to_use.md``."""
-    return how_to_markdown(
-        mailbox_name="{{MAILBOX_NAME}}",
-        output_dir="{{OUTPUT_DIR}}",
-        project_dir="{{PROJECT_DIR}}",
-    )
-
-
-def write_how_to(output_dir: Path, *, mailbox_name: str = "") -> Path:
-    """Create/update `how_to_use.md` at the project root. Returns the path written."""
-    output_dir = ensure_layout(output_dir)
-    project = infer_project_root(output_dir)
-    if output_dir.name == EMAIL_DIR:
-        ensure_project_layout(project, mailbox_name=mailbox_name)
-    path = howto_path_for_output(output_dir)
-    body = how_to_markdown(
-        mailbox_name=mailbox_name,
-        output_dir=str(output_dir),
-        project_dir=str(project),
-    )
-    try:
-        if path.is_file() and path.read_text(encoding="utf-8") == body:
-            remove_legacy_howto(output_dir)
-            remove_legacy_howto(project)
-            return path
-    except OSError:
-        pass
-    path.write_text(body, encoding="utf-8")
-    remove_legacy_howto(output_dir)
-    remove_legacy_howto(project)
-    return path
-
-
-def sync_how_to_all(jobs: list) -> list[Path]:
-    """Rewrite `how_to_use.md` for every job whose Email folder exists on disk."""
-    written: list[Path] = []
-    for job in jobs:
-        raw = str(getattr(job, "output_dir", "") or "").strip()
-        name = str(getattr(job, "name", "") or "")
-        if not raw:
-            continue
-        folder = Path(raw).expanduser()
-        if not folder.is_dir():
-            continue
-        written.append(write_how_to(folder, mailbox_name=name))
-    return written

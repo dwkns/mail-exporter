@@ -59,7 +59,7 @@ struct MailExporterApp: App {
         .handlesExternalEvents(matching: ["*"])
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Export") {
+                Button("New Project") {
                     NotificationCenter.default.post(name: .mailExporterNewExport, object: nil)
                 }
                 .keyboardShortcut("n")

@@ -59,10 +59,17 @@ struct RunView: View {
             run(jobID: nil)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mailExporterExportJob)) { note in
-            guard !busy, let name = note.userInfo?["name"] as? String else { return }
-            let needle = name.lowercased()
-            guard let job = store.jobs.first(where: { $0.name.lowercased() == needle }) else { return }
-            guard store.folderStatus(for: job).isValidForExport else { return }
+            guard !busy else { return }
+            let job: ExportJob?
+            if let id = note.userInfo?["id"] as? String, !id.isEmpty {
+                job = store.jobs.first(where: { $0.id == id })
+            } else if let name = note.userInfo?["name"] as? String {
+                let needle = name.lowercased()
+                job = store.jobs.first(where: { $0.name.lowercased() == needle })
+            } else {
+                job = nil
+            }
+            guard let job, store.folderStatus(for: job).isValidForExport else { return }
             run(jobID: job.id)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mailExporterShowFolder)) { note in
