@@ -85,6 +85,22 @@ def test_dry_run_counts_and_samples(tmp_path: Path, monkeypatch) -> None:
     assert "1 match" in result["line"]
 
 
+def test_dry_run_counts_when_output_folder_missing(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<a@x>", subject="Your invoice"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    job.output_dir = str(tmp_path / "Unsaved Claim" / "Email")
+    assert not Path(job.output_dir).exists()
+    result = run_job(job, dry_run=True)
+    assert result["matchCount"] == 1
+    assert not Path(job.output_dir).exists()
+
+
 def test_incremental_export_writes_then_skips(tmp_path: Path, monkeypatch) -> None:
     mail = tmp_path / "mail"
     p1 = _write_emlx(

@@ -152,11 +152,11 @@ def default_jobs_path() -> Path:
     return home / _LOCAL_JOBS_REL
 
 
-def parse_job(raw: dict[str, Any]) -> Job:
+def parse_job(raw: dict[str, Any], *, require_output_dir: bool = True) -> Job:
     jid = str(raw.get("id") or uuid.uuid4())
     name = str(raw.get("name") or "").strip() or "Untitled"
     output = str(raw.get("outputDir") or "").strip()
-    if not output:
+    if not output and require_output_dir:
         raise ValueError(f"job {name!r}: outputDir required")
     match = parse_match(raw.get("match") if isinstance(raw.get("match"), dict) else None)
     extra = {k: v for k, v in raw.items() if k not in _KNOWN_JOB_KEYS}
@@ -173,7 +173,7 @@ def parse_job(raw: dict[str, Any]) -> Job:
     )
 
 
-def load_jobs(path: Path) -> JobsFile:
+def load_jobs(path: Path, *, require_output_dir: bool = True) -> JobsFile:
     if not path.is_file():
         return JobsFile(jobs=[])
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -182,7 +182,13 @@ def load_jobs(path: Path) -> JobsFile:
     raw_jobs = data.get("jobs") or []
     if not isinstance(raw_jobs, list):
         raise ValueError("jobs must be an array")
-    return JobsFile(jobs=[parse_job(j) for j in raw_jobs if isinstance(j, dict)])
+    return JobsFile(
+        jobs=[
+            parse_job(j, require_output_dir=require_output_dir)
+            for j in raw_jobs
+            if isinstance(j, dict)
+        ]
+    )
 
 
 def save_jobs(jobs: JobsFile, path: Path) -> None:

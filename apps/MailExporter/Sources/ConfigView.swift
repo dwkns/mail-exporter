@@ -247,7 +247,10 @@ struct JobEditorSheet: View {
         let started = Date()
         let config: URL
         do {
-            config = try store.temporaryConfigURL(including: draft)
+            config = try store.temporaryConfigURL(
+                including: draft,
+                projectParent: presentation.isAdd ? projectParent : nil
+            )
         } catch {
             stopTicker()
             busy = false

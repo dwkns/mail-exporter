@@ -114,6 +114,93 @@ def test_draft_alias_matches_append_draft(tmp_path: Path, capsys) -> None:
     assert payload["ok"] is True
 
 
+def test_dry_run_allows_unsaved_job_without_output_dir(tmp_path: Path) -> None:
+    config = tmp_path / "preview.json"
+    config.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "draft-1",
+                        "name": "Unsaved Claim",
+                        "outputDir": "",
+                        "match": {
+                            "conjunction": "any",
+                            "conditions": [
+                                {
+                                    "field": "entire",
+                                    "op": "contains",
+                                    "values": ["invoice"],
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("engine.cli.run_job") as run_job:
+        run_job.return_value = {
+            "line": "1 match",
+            "matchCount": 1,
+            "dryRun": True,
+            "countMatch": True,
+        }
+        payload, code = run_export(
+            config=str(config),
+            job_id="draft-1",
+            job_name=None,
+            dry_run=True,
+            force_full=False,
+        )
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["results"][0]["matchCount"] == 1
+    job = run_job.call_args.args[0]
+    assert job.id == "draft-1"
+    assert job.output_dir == ""
+    assert run_job.call_args.kwargs["dry_run"] is True
+
+
+def test_export_rejects_unsaved_job_without_output_dir(tmp_path: Path) -> None:
+    config = tmp_path / "preview.json"
+    config.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "draft-1",
+                        "name": "Unsaved Claim",
+                        "outputDir": "",
+                        "match": {
+                            "conjunction": "any",
+                            "conditions": [
+                                {
+                                    "field": "entire",
+                                    "op": "contains",
+                                    "values": ["invoice"],
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload, code = run_export(
+        config=str(config),
+        job_id="draft-1",
+        job_name=None,
+        dry_run=False,
+        force_full=False,
+    )
+    assert code == 1
+    assert payload["ok"] is False
+    assert "outputDir" in payload["error"]
+
+
 def test_export_json_only_stdout(tmp_path: Path, capsys) -> None:
     config = tmp_path / "jobs.json"
     raw = {
