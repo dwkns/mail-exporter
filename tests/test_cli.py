@@ -163,6 +163,57 @@ def test_dry_run_allows_unsaved_job_without_output_dir(tmp_path: Path) -> None:
     assert run_job.call_args.kwargs["dry_run"] is True
 
 
+def test_dry_run_unsaved_new_project_empty_search_row(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """New Project Check Matches: no outputDir yet, default empty condition row."""
+    config = tmp_path / "preview.json"
+    mail = tmp_path / "mail"
+    mail.mkdir()
+    config.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "draft-new",
+                        "name": "New Project",
+                        "outputDir": "",
+                        "mailRoot": str(mail),
+                        "match": {
+                            "conjunction": "all",
+                            "groups": [
+                                {
+                                    "conjunction": "any",
+                                    "conditions": [
+                                        {
+                                            "field": "entire",
+                                            "op": "contains",
+                                            "values": [],
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [])
+    payload, code = run_export(
+        config=str(config),
+        job_id="draft-new",
+        job_name=None,
+        dry_run=True,
+        force_full=False,
+    )
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["results"][0]["matchCount"] == 0
+    assert payload["results"][0]["dryRun"] is True
+
+
 def test_export_rejects_unsaved_job_without_output_dir(tmp_path: Path) -> None:
     config = tmp_path / "preview.json"
     config.write_text(
