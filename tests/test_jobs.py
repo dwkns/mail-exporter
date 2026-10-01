@@ -65,6 +65,58 @@ def test_parse_job_requires_output_dir() -> None:
         parse_job({"name": "X", "match": {"all": [{"field": "subject", "op": "contains", "values": ["a"]}]}})
 
 
+def test_parse_job_allows_empty_output_dir_when_not_required() -> None:
+    job = parse_job(
+        {
+            "name": "Draft",
+            "outputDir": "",
+            "match": {
+                "conjunction": "any",
+                "conditions": [
+                    {"field": "entire", "op": "contains", "values": ["a"]}
+                ],
+            },
+        },
+        require_output_dir=False,
+    )
+    assert job.name == "Draft"
+    assert job.output_dir == ""
+
+
+def test_load_jobs_dry_run_overlay_without_output_dir(tmp_path: Path) -> None:
+    path = tmp_path / "preview.json"
+    path.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "draft-1",
+                        "name": "Unsaved Claim",
+                        "outputDir": "",
+                        "match": {
+                            "conjunction": "any",
+                            "conditions": [
+                                {
+                                    "field": "entire",
+                                    "op": "contains",
+                                    "values": ["invoice"],
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="outputDir"):
+        load_jobs(path)
+    loaded = load_jobs(path, require_output_dir=False)
+    assert len(loaded.jobs) == 1
+    assert loaded.jobs[0].id == "draft-1"
+    assert loaded.jobs[0].output_dir == ""
+
+
 def test_parse_job_keeps_project_dir(tmp_path: Path) -> None:
     project = tmp_path / "Claim"
     email = project / "Email"
