@@ -57,6 +57,15 @@ def test_write_how_to_at_project_root(tmp_path: Path) -> None:
     assert (tmp_path / "Claim" / "Documents").is_dir()
 
 
+def test_write_how_to_does_not_recreate_stale_sibling(tmp_path: Path) -> None:
+    current = tmp_path / "Helen Mortgage" / "Email"
+    current.mkdir(parents=True)
+    stale = tmp_path / "helen-mortgage" / "Helen Mortgage"
+    write_how_to(current, mailbox_name="Helen Mortgage")
+    assert (tmp_path / "Helen Mortgage" / "how_to_use.md").is_file()
+    assert not stale.exists()
+
+
 def test_sync_how_to_all_skips_missing_folders(tmp_path: Path) -> None:
     present = tmp_path / "Here" / "Email"
     present.mkdir(parents=True)

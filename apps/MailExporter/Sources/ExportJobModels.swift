@@ -196,6 +196,21 @@ struct ExportJob: Identifiable, Equatable, Codable {
             forKey: .match
         )
     }
+
+    /// Case-file root implied by `outputDir`. Ignores a stale `projectDir`.
+    var resolvedProjectDir: String {
+        let raw = outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            return (projectDir ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ProjectLayout.resolvedProjectRoot(outputDir: raw, stored: projectDir)
+    }
+
+    mutating func syncProjectDirFromOutput() {
+        let raw = outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
+        projectDir = ProjectLayout.inferProjectRoot(from: raw)
+    }
 }
 
 private struct MatchPayload: Codable {

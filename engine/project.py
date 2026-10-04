@@ -75,6 +75,28 @@ def infer_project_root(path: Path) -> Path:
     return p
 
 
+def resolved_project_root(
+    output_dir: str | Path,
+    stored_project_dir: str | Path | None = None,
+) -> Path:
+    """Project root that matches ``output_dir``.
+
+    A leftover ``projectDir`` (moved folder, old slug path) is ignored so
+    writers cannot recreate the previous location.
+    """
+    inferred = infer_project_root(Path(output_dir))
+    stored = str(stored_project_dir or "").strip()
+    if not stored:
+        return inferred
+    stored_path = Path(stored).expanduser()
+    try:
+        if stored_path.resolve() == inferred:
+            return inferred
+    except OSError:
+        pass
+    return inferred
+
+
 def email_dir(project_root: Path) -> Path:
     return Path(project_root).expanduser() / EMAIL_DIR
 

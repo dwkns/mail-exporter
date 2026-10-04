@@ -43,6 +43,25 @@ enum ProjectLayout {
         return url.path
     }
 
+    static func standardizedPath(_ raw: String) -> String {
+        URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL.path
+    }
+
+    static func samePath(_ a: String, _ b: String) -> Bool {
+        standardizedPath(a).caseInsensitiveCompare(standardizedPath(b)) == .orderedSame
+    }
+
+    /// Project root that matches `outputDir`. A leftover `projectDir` (moved
+    /// folder, old slug path) is ignored so Export cannot recreate it.
+    static func resolvedProjectRoot(outputDir: String, stored: String? = nil) -> String {
+        let inferred = inferProjectRoot(from: outputDir)
+        let storedPath = (stored ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if storedPath.isEmpty || samePath(storedPath, inferred) {
+            return inferred
+        }
+        return inferred
+    }
+
     @discardableResult
     static func ensure(at projectRoot: URL, mailboxName: String) throws -> URL {
         let fm = FileManager.default

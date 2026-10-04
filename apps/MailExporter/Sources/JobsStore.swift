@@ -312,9 +312,10 @@ final class JobsStore: ObservableObject {
             let data = try Self.coordinateRead(from: targetURL)
             let doc = try JSONDecoder().decode(JobsDocument.self, from: data)
             jobs = doc.jobs
+            let healed = healStaleProjectDirs()
             let n = jobs.count
             status = n == 1 ? "1 export" : "\(n) exports"
-            if targetURL != url {
+            if healed || targetURL != url {
                 save()
             }
             syncHowToUseToAllJobs()
@@ -485,11 +486,11 @@ final class JobsStore: ObservableObject {
         } else {
             try fm.createDirectory(atPath: path, withIntermediateDirectories: true)
         }
-        let projectPath = (job.projectDir?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? ProjectLayout.inferProjectRoot(from: path)
+        let projectPath = ProjectLayout.resolvedProjectRoot(outputDir: path, stored: job.projectDir)
         let projectURL = URL(fileURLWithPath: (projectPath as NSString).expandingTildeInPath)
         try ProjectLayout.ensure(at: projectURL, mailboxName: job.name)
         writeHowToUse(in: path, mailboxName: job.name, projectDir: projectURL.path)
+        persistResolvedProjectDir(jobID: job.id, projectPath: projectURL.path)
     }
 
     /// Refresh the bookmark for a job from its current outputDir on disk if the directory exists.
@@ -510,6 +511,7 @@ final class JobsStore: ObservableObject {
     func updateOutputDir(for jobID: String, newPath: String) {
         guard let idx = jobs.firstIndex(where: { $0.id == jobID }) else { return }
         jobs[idx].outputDir = newPath
+        jobs[idx].syncProjectDirFromOutput()
         refreshBookmark(for: idx)
         save()
         writeHowToUseIfFolderExists(jobs[idx])
@@ -525,8 +527,7 @@ final class JobsStore: ObservableObject {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            jobs[idx].outputDir = url.path
-            refreshBookmark(for: idx)
+            applyFolderToJob(&jobs[idx], url: url)
             save()
             writeHowToUseIfFolderExists(jobs[idx])
         }
@@ -643,8 +644,7 @@ final class JobsStore: ObservableObject {
 
     private func writeHowToUseIfFolderExists(_ job: ExportJob) {
         guard case .exists(let url) = folderStatus(for: job) else { return }
-        let project = (job.projectDir?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? ProjectLayout.inferProjectRoot(from: url.path)
+        let project = ProjectLayout.resolvedProjectRoot(outputDir: url.path, stored: job.projectDir)
         writeHowToUse(in: url.path, mailboxName: job.name, projectDir: project)
     }
 
@@ -718,17 +718,19 @@ final class JobsStore: ObservableObject {
 
     /// Insert or replace a job and write `jobs.json`. Refreshes `how_to_use.md` if the folder exists.
     func upsertJob(_ job: ExportJob) {
-        if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
-            jobs[idx] = job
+        var next = job
+        next.syncProjectDirFromOutput()
+        if let idx = jobs.firstIndex(where: { $0.id == next.id }) {
+            jobs[idx] = next
             refreshBookmark(for: idx)
         } else {
-            jobs.append(job)
-            if let idx = jobs.firstIndex(where: { $0.id == job.id }) {
+            jobs.append(next)
+            if let idx = jobs.firstIndex(where: { $0.id == next.id }) {
                 refreshBookmark(for: idx)
             }
         }
         save()
-        writeHowToUseIfFolderExists(job)
+        writeHowToUseIfFolderExists(next)
     }
 
     /// Encode `jobs` plus an optional draft overlay to a temp file (Check Matches
@@ -757,6 +759,31 @@ final class JobsStore: ObservableObject {
         let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
         return ProjectLayout.defaultParent
+    }
+
+    /// Rewrite `projectDir` when it no longer matches `outputDir`.
+    @discardableResult
+    private func healStaleProjectDirs() -> Bool {
+        var healed = false
+        for i in jobs.indices {
+            let raw = jobs[i].outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { continue }
+            let resolved = ProjectLayout.inferProjectRoot(from: raw)
+            let stored = (jobs[i].projectDir ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if stored.isEmpty || !ProjectLayout.samePath(stored, resolved) {
+                jobs[i].projectDir = resolved
+                healed = true
+            }
+        }
+        return healed
+    }
+
+    private func persistResolvedProjectDir(jobID: String, projectPath: String) {
+        guard let idx = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        let stored = (jobs[idx].projectDir ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard stored.isEmpty || !ProjectLayout.samePath(stored, projectPath) else { return }
+        jobs[idx].projectDir = projectPath
+        save()
     }
 
     func applyFolderToJob(_ job: inout ExportJob, url: URL) {

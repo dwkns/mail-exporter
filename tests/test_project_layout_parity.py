@@ -58,3 +58,4 @@ def test_swift_project_layout_matches_shared() -> None:
     parent = "/".join(layout["default_parent_segments"])
     assert f'appendingPathComponent("{parent}")' in text
     assert "Desktop/home" not in text
+    assert "func resolvedProjectRoot" in text

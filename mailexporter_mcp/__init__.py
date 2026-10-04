@@ -26,7 +26,7 @@ from engine.compose_draft import compose_markdown_text  # noqa: E402
 from engine.criteria import parse_match  # noqa: E402
 from engine.howto import DRAFTS_SUBDIR, HOW_TO_FILENAME, SENT_SUBDIR, sync_how_to_all, write_how_to  # noqa: E402
 from engine.jobs import Job, JobsFile, default_jobs_path, load_jobs, save_jobs  # noqa: E402
-from engine.project import LEGACY_HOWTO, infer_project_root  # noqa: E402
+from engine.project import LEGACY_HOWTO, resolved_project_root  # noqa: E402
 
 mcp = FastMCP("mail-exporter")
 
@@ -620,7 +620,7 @@ def create_job(
         include_sent=include_sent,
         include_bin=include_bin,
         include_thread=include_thread,
-        project_dir=str(infer_project_root(Path(output_dir))),
+        project_dir=str(resolved_project_root(output_dir)),
     )
     jobs.jobs.append(job)
     save_jobs(jobs, path)
@@ -660,6 +660,7 @@ def edit_job(
         target.name = name.strip()
     if output_dir.strip():
         target.output_dir = output_dir.strip()
+        target.project_dir = str(resolved_project_root(target.output_dir))
     if match_json.strip():
         try:
             parsed = json.loads(match_json)

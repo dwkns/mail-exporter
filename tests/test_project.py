@@ -7,6 +7,7 @@ from engine.project import (
     email_dir,
     ensure_project_layout,
     infer_project_root,
+    resolved_project_root,
     sanitized_folder_name,
 )
 
@@ -37,3 +38,14 @@ def test_infer_project_root(tmp_path: Path) -> None:
     md.write_text("x")
     assert infer_project_root(md) == (tmp_path / "Claim").resolve()
     assert email_dir(tmp_path / "Claim") == tmp_path / "Claim" / "Email"
+
+
+def test_resolved_project_root_ignores_stale_path(tmp_path: Path) -> None:
+    current = tmp_path / "Helen Mortgage"
+    email = current / "Email"
+    email.mkdir(parents=True)
+    stale = tmp_path / "helen-mortgage" / "Helen Mortgage"
+    assert resolved_project_root(email, stale) == current.resolve()
+    assert resolved_project_root(email, current) == current.resolve()
+    assert resolved_project_root(email, None) == current.resolve()
+    assert not stale.exists()

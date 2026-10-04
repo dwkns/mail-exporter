@@ -213,6 +213,15 @@ def test_mcp_create_edit_and_list_drafts(
     assert edited["ok"] is True
     assert edited["job"]["includeThread"] is True
 
+    moved = tmp_path / "Helen Mortgage" / "Email"
+    moved.mkdir(parents=True)
+    relocated = json.loads(
+        m.edit_job(job_name="Invoices", output_dir=str(moved))
+    )
+    assert relocated["ok"] is True
+    assert relocated["job"]["outputDir"] == str(moved)
+    assert relocated["job"]["projectDir"] == str(moved.parent)
+
 
 def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from engine.jobs import JobsFile, save_jobs, seed_dhl_job
