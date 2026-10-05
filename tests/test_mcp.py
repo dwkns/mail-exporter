@@ -237,10 +237,10 @@ def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     import mailexporter_mcp as m
 
     importlib.reload(m)
-    with patch("mailexporter_mcp.run_export") as run, patch(
+    with patch("mailexporter_mcp._ask_app") as ask, patch(
         "mailexporter_mcp.write_how_to"
     ) as wh:
-        run.return_value = ({"ok": True, "results": [{"matchCount": 3}]}, 0)
+        ask.return_value = {"ok": True, "results": [{"matchCount": 3}]}
         wh.return_value = out / "how_to_use.md"
         data = json.loads(m.export_job(job_name="DHL"))
         dry = json.loads(m.check_matches(job_name="DHL"))
@@ -248,15 +248,13 @@ def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     assert data["ok"] is True
     assert dry["ok"] is True
     assert nulls["ok"] is True
-    assert run.call_count == 3
-    kwargs = run.call_args_list[0].kwargs
-    assert kwargs["job_name"] == "DHL"
-    assert kwargs["job_id"] is None
-    assert kwargs["force_full"] is False
-    assert kwargs["dry_run"] is False
-    assert run.call_args_list[1].kwargs["dry_run"] is True
-    assert "-m" not in str(run.call_args_list)
-    assert run.call_args_list[0].args == () or "engine" not in run.call_args_list[0].args
+    assert ask.call_count == 3
+    req = ask.call_args_list[0].args[0]
+    assert req["cmd"] == "export"
+    assert req["jobName"] == "DHL"
+    assert req["dryRun"] is False
+    assert req["forceFull"] is False
+    assert ask.call_args_list[1].args[0]["dryRun"] is True
 
 
 def test_mcp_export_job_requires_selector(

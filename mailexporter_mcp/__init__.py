@@ -6,8 +6,10 @@ import email
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
+import time
 from email.header import decode_header, make_header
 from email.message import Message
 from pathlib import Path
@@ -20,7 +22,6 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from engine.cli import run_export  # noqa: E402
 from engine.compose_draft import compose_draft as _compose_draft  # noqa: E402
 from engine.compose_draft import compose_markdown_text  # noqa: E402
 from engine.criteria import parse_match  # noqa: E402
@@ -190,6 +191,48 @@ def _run_engine(args: list[str]) -> dict[str, Any]:
     return payload
 
 
+_APP_SOCKET = Path.home() / "Library/Application Support/MailExporter/cmd.sock"
+_APP_BUNDLE = Path("/Applications/MailExporter.app")
+
+
+def _ask_app(req: dict[str, Any]) -> dict[str, Any]:
+    """Ask the MailExporter app to do the work. This process does not read Mail."""
+
+    def once() -> dict[str, Any]:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(600)
+            sock.connect(str(_APP_SOCKET))
+            sock.sendall((json.dumps(req) + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+        if not buf:
+            return {"ok": False, "error": "MailExporter returned nothing"}
+        payload = json.loads(buf.split(b"\n", 1)[0])
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "MailExporter returned a non-object"}
+        return payload
+
+    try:
+        return once()
+    except (FileNotFoundError, ConnectionRefusedError, OSError):
+        if _APP_BUNDLE.is_dir():
+            subprocess.run(["/usr/bin/open", "-a", str(_APP_BUNDLE)], check=False)
+        for _ in range(40):
+            time.sleep(0.25)
+            try:
+                return once()
+            except (FileNotFoundError, ConnectionRefusedError, OSError):
+                continue
+        return {
+            "ok": False,
+            "error": "MailExporter is not running, so it could not read your mail.",
+        }
+
+
 def _call_export(
     *,
     job_name: str | None = None,
@@ -197,20 +240,25 @@ def _call_export(
     force_full: bool | None = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Run export in-process so frozen MCP never shells out with ``-m engine``."""
+    """Ask MailExporter.app to export. Do not read ~/Library/Mail in this process."""
     name = (job_name or "").strip()
     jid = (job_id or "").strip()
     if not name and not jid:
         return {"ok": False, "error": "provide job_name or job_id"}
-    payload, code = run_export(
-        config=str(_config_path()),
-        job_id=jid or None,
-        job_name=name or None,
-        dry_run=dry_run,
-        force_full=bool(force_full),
-    )
-    payload.setdefault("ok", code == 0)
-    payload["_exit"] = code
+    req: dict[str, Any] = {
+        "cmd": "export",
+        "config": str(_config_path()),
+        "dryRun": dry_run,
+        "forceFull": bool(force_full),
+    }
+    if jid:
+        req["jobId"] = jid
+    if name:
+        req["jobName"] = name
+    payload = _ask_app(req)
+    if "exitCode" in payload and "_exit" not in payload:
+        payload["_exit"] = payload["exitCode"]
+    payload.setdefault("ok", payload.get("_exit", 0) == 0)
     return payload
 
 

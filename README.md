@@ -190,7 +190,7 @@ Details and the Markdown front-matter format are in `how_to_use.md` at the proje
 
 Project config (this repo already has `.cursor/mcp.json`) or a global config at `~/.cursor/mcp.json`. Prefer the installed helper command above. Reload the window after editing MCP config.
 
-Grant **Cursor** Full Disk Access if `export_job` / `check_matches` cannot read Mail.
+Export and match checks are done by MailExporter.app, which already has disk access. Cursor only passes the request along.
 
 Ask Agent things like: “List MailExporter jobs” or “Read the latest messages in the DHL export.”
 
@@ -202,7 +202,7 @@ Ask Agent things like: “List MailExporter jobs” or “Read the latest messag
 2. Open **Claude → Settings → Developer → Edit Config** (`~/Library/Application Support/Claude/claude_desktop_config.json`).
 3. Merge the installed-helper `mcpServers` block above (keep any servers you already have).
 4. Fully quit Claude Desktop (Cmd-Q) and reopen it.
-5. Grant **Claude** Full Disk Access if exports cannot read Mail.
+5. Export and match checks are done by MailExporter.app. Claude only passes the request along.
 
 Claude Desktop only understands local stdio servers in that JSON file. Use absolute paths.
 

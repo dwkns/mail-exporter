@@ -112,7 +112,21 @@ final class EngineSession {
         }
     }
 
+    /// Run one engine command and return its JSON line. Callers outside the app
+    /// use this so mail is read by this app, not by Cursor or Claude.
+    func performRaw(_ req: [String: Any]) throws -> String {
+        try queue.sync {
+            try ensureStarted()
+            return try sendRawLocked(req)
+        }
+    }
+
     private func sendLocked(_ req: [String: Any]) throws -> EngineResult {
+        let raw = try sendRawLocked(req)
+        return try EngineBridge.parseEngineOutput(raw + "\n", status: 0, wall: 0)
+    }
+
+    private func sendRawLocked(_ req: [String: Any]) throws -> String {
         let payload = try JSONSerialization.data(withJSONObject: req)
         guard var line = String(data: payload, encoding: .utf8) else {
             throw NSError(
@@ -138,7 +152,7 @@ final class EngineSession {
                 userInfo: [NSLocalizedDescriptionKey: "Engine worker returned no response"]
             )
         }
-        return try EngineBridge.parseEngineOutput(raw + "\n", status: 0, wall: 0)
+        return raw
     }
 
     private func readLineLocked(timeout: TimeInterval) throws -> String? {

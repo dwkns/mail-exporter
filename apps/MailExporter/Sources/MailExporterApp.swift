@@ -110,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.setActivationPolicy(.regular)
         NSWindow.allowsAutomaticWindowTabbing = false
+        AppCommandServer.start()
         EngineBridge.prewarm()
         _ = AppUpdater.shared
         // Finder sometimes passes paths as argv when launching by drop.
