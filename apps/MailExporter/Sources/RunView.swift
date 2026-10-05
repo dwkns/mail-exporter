@@ -49,6 +49,7 @@ struct RunView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { store.publishExternalExport() }
         .onDisappear { stopTicker() }
         .onReceive(NotificationCenter.default.publisher(for: .mailExporterNewExport)) { _ in
             guard !busy else { return }
@@ -71,6 +72,10 @@ struct RunView: View {
             }
             guard let job, store.folderStatus(for: job).isValidForExport else { return }
             run(jobID: job.id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterExternalExport)) { note in
+            guard !busy else { return }
+            applyExternalExport(note.userInfo)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mailExporterShowFolder)) { note in
             guard let name = note.userInfo?["name"] as? String else { return }
@@ -546,6 +551,26 @@ struct RunView: View {
                 durationSeconds: duration
             )
         }
+    }
+
+    private func applyExternalExport(_ info: [AnyHashable: Any]?) {
+        guard let results = info?["results"] as? [[String: Any]], !results.isEmpty else { return }
+        if results.allSatisfy({ $0["dryRun"] as? Bool == true }) { return }
+        let payload: [String: Any] = [
+            "results": results,
+            "line": info?["line"] as? String ?? "",
+            "ok": info?["ok"] as? Bool ?? true,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let raw = String(data: data, encoding: .utf8)
+        else { return }
+        let result = EngineResult(
+            line: payload["line"] as? String ?? "",
+            ok: true,
+            rawJSON: raw,
+            matchCount: nil
+        )
+        applyResult(result, focusedJobID: nil, duration: 0)
     }
 
     private func applyResult(

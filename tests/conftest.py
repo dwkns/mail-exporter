@@ -16,3 +16,9 @@ if str(_ROOT) not in sys.path:
 @pytest.fixture
 def repo_root() -> Path:
     return _ROOT
+
+
+@pytest.fixture(autouse=True)
+def _isolate_last_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep MCP/CLI export status out of the real Application Support file."""
+    monkeypatch.setenv("MAILEXPORTER_LAST_EXPORT", str(tmp_path / "last-export.json"))

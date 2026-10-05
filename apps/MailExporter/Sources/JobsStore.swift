@@ -13,6 +13,7 @@ final class JobsStore: ObservableObject {
     @Published var needsAutomation: Bool = false
 
     private let cloudWatch = JobsCloudWatch()
+    private let exportWatch = JobsCloudWatch()
     private var ignoreCloudReloadUntil = Date.distantPast
     private var ubiquityObserver: NSObjectProtocol?
 
@@ -54,6 +55,12 @@ final class JobsStore: ObservableObject {
     static var jobsLocationPointerURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/MailExporter/jobs-location")
+    }
+
+    /// Written by MCP / CLI export so the running app can refresh “N new”.
+    static var lastExportURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/MailExporter/last-export.json")
     }
 
     static func writeJobsLocationPointer(_ url: URL) {
@@ -124,7 +131,9 @@ final class JobsStore: ObservableObject {
         reload()
         refreshMailAccess()
         startWatchingJobsFile()
+        startWatchingLastExport()
         observeUbiquityIdentity()
+        publishExternalExport()
     }
 
     /// Ask iCloud to materialize `jobs.json` (and its Documents folder) if the
@@ -169,6 +178,27 @@ final class JobsStore: ObservableObject {
                 self.reloadIfExternalChange()
             }
         }
+    }
+
+    private func startWatchingLastExport() {
+        exportWatch.start(url: Self.lastExportURL) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.publishExternalExport()
+            }
+        }
+    }
+
+    func publishExternalExport() {
+        let url = Self.lastExportURL
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        NotificationCenter.default.post(
+            name: .mailExporterExternalExport,
+            object: nil,
+            userInfo: obj
+        )
     }
 
     private func reloadIfExternalChange() {

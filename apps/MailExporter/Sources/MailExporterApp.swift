@@ -7,6 +7,7 @@ extension Notification.Name {
     static let mailExporterExportJob = Notification.Name("mailExporterExportJob")
     static let mailExporterShowFolder = Notification.Name("mailExporterShowFolder")
     static let mailExporterPermissionsChanged = Notification.Name("mailExporterPermissionsChanged")
+    static let mailExporterExternalExport = Notification.Name("mailExporterExternalExport")
 }
 
 enum MailExporterURL {

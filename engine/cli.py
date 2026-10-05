@@ -136,6 +136,10 @@ def run_export(
     }
     if bench:
         payload["wall_s"] = round(time.perf_counter() - t0, 3)
+    if not dry_run:
+        from engine.export_status import publish_export_results
+
+        publish_export_results(payload)
     return payload, (2 if any_fail else 0)
 
 

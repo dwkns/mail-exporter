@@ -88,7 +88,14 @@ def test_export_does_not_rewrite_jobs_json(tmp_path: Path) -> None:
     config.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
     before = config.read_text(encoding="utf-8")
     with patch("engine.cli.run_job") as run_job:
-        run_job.return_value = {"line": "Tracked: 0 copied", "countMatch": True}
+        run_job.return_value = {
+            "id": "job-1",
+            "name": "Tracked",
+            "line": "Tracked: 0 copied",
+            "countMatch": True,
+            "newlyWritten": 0,
+            "dryRun": False,
+        }
         payload, code = run_export(
             config=str(config),
             job_id=None,
