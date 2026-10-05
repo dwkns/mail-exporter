@@ -65,7 +65,10 @@ def run_export(
 ) -> tuple[dict, int]:
     """Run one or more export jobs. Returns (payload, exit_code)."""
     path = config_path(config)
-    jobs = load_jobs(path)
+    try:
+        jobs = load_jobs(path, require_output_dir=not dry_run)
+    except ValueError as exc:
+        return {"error": str(exc), "ok": False}, 1
     if not jobs.jobs:
         return {
             "error": "no jobs — run seed or create jobs in MailExporter",
@@ -207,14 +210,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
         else:
             os.environ.pop("MAILEXPORTER_NO_RG", None)
 
-        payload, code = run_export(
-            config=req.get("config") or args.config,
-            job_id=req.get("jobId"),
-            job_name=req.get("jobName"),
-            dry_run=bool(req.get("dryRun")),
-            force_full=bool(req.get("forceFull")),
-            bench=bool(req.get("bench")),
-        )
+        try:
+            payload, code = run_export(
+                config=req.get("config") or args.config,
+                job_id=req.get("jobId"),
+                job_name=req.get("jobName"),
+                dry_run=bool(req.get("dryRun")),
+                force_full=bool(req.get("forceFull")),
+                bench=bool(req.get("bench")),
+            )
+        except Exception as exc:
+            print(
+                json.dumps({"ok": False, "error": str(exc), "exitCode": 1}),
+                flush=True,
+            )
+            continue
         payload["exitCode"] = code
         print(json.dumps(payload), flush=True)
     return 0

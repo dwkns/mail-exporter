@@ -123,7 +123,7 @@ def _parse_conjunction(raw: Any, label: str) -> Literal["any", "all"]:
     return mode  # type: ignore[return-value]
 
 
-def _parse_clause(item: dict[str, Any], label: str) -> Clause:
+def _parse_clause(item: dict[str, Any], label: str) -> Clause | None:
     field = _normalize_field(str(item.get("field", "")))
     op = _normalize_op(str(item.get("op", "")))
     if field in TEXT_FIELDS:
@@ -133,16 +133,19 @@ def _parse_clause(item: dict[str, Any], label: str) -> Clause:
         # Allow single "value" string (Mail-row style)
         if values is None and item.get("value") is not None:
             values = [str(item.get("value"))]
-        if not isinstance(values, list) or not any(str(v).strip() for v in values):
-            raise ValueError(f"{label}: values must be a non-empty array")
+        if not isinstance(values, list):
+            raise ValueError(f"{label}: values must be an array")
         cleaned = [str(v).strip() for v in values if str(v).strip()]
+        if not cleaned:
+            # Empty editor row (New Project default). Skip; do not fail Check Matches.
+            return None
         return Clause(field=field, op=op, values=cleaned)
     if field in DATE_FIELDS:
         if op not in DATE_OPS:
             raise ValueError(f"{label}: op must be after|before for date")
         dv = item.get("date") or item.get("value")
         if not dv:
-            raise ValueError(f"{label}: date is required")
+            return None
         return Clause(field="date", op=op, date_value=parse_date(str(dv)))
     raise ValueError(
         f"{label}: unsupported field {field!r} "
@@ -151,9 +154,16 @@ def _parse_clause(item: dict[str, Any], label: str) -> Clause:
 
 
 def _parse_conditions(raw: Any, label: str) -> list[Clause]:
-    if not isinstance(raw, list) or not raw:
-        raise ValueError(f"{label} must be a non-empty array")
-    return [_parse_clause(item, f"{label}[{i}]") for i, item in enumerate(raw)]
+    if not isinstance(raw, list):
+        raise ValueError(f"{label} must be an array")
+    clauses: list[Clause] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        parsed = _parse_clause(item, f"{label}[{i}]")
+        if parsed is not None:
+            clauses.append(parsed)
+    return clauses
 
 
 def _parse_group(raw: dict[str, Any], label: str) -> MatchGroup:

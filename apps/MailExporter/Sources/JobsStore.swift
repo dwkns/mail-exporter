@@ -763,14 +763,31 @@ final class JobsStore: ObservableObject {
         writeHowToUseIfFolderExists(next)
     }
 
+    /// Overlay used by Check Matches: never writes `jobs.json` or creates folders.
+    /// New Project drafts have an empty `outputDir` until Save; fill the planned
+    /// `{parent}/{name}/Email` path so the engine can count matches.
+    func previewOverlay(from draft: ExportJob, projectParent: String? = nil) -> ExportJob {
+        var overlay = draft
+        let output = overlay.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        if output.isEmpty {
+            let parentRaw = projectParent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let parent = parentRaw.isEmpty ? lastProjectParent() : parentRaw
+            let planned = ProjectLayout.planned(name: overlay.name, parent: parent)
+            overlay.projectDir = planned.project.path
+            overlay.outputDir = planned.email.path
+        }
+        return overlay
+    }
+
     /// Encode `jobs` plus an optional draft overlay to a temp file (Check Matches
-    /// without committing the sheet).
-    func temporaryConfigURL(including draft: ExportJob) throws -> URL {
+    /// without committing the sheet). The overlay job does not need to exist on disk.
+    func temporaryConfigURL(including draft: ExportJob, projectParent: String? = nil) throws -> URL {
+        let overlay = previewOverlay(from: draft, projectParent: projectParent)
         var tempJobs = jobs
-        if let idx = tempJobs.firstIndex(where: { $0.id == draft.id }) {
-            tempJobs[idx] = draft
+        if let idx = tempJobs.firstIndex(where: { $0.id == overlay.id }) {
+            tempJobs[idx] = overlay
         } else {
-            tempJobs.append(draft)
+            tempJobs.append(overlay)
         }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("mailexporter-preview-\(UUID().uuidString).json")

@@ -95,10 +95,16 @@ enum ProjectLayout {
         return email
     }
 
-    static func createProject(name: String, parent: String) throws -> (project: URL, email: URL) {
+    /// Planned `{parent}/{name}/` and `Email/` paths. Does not create folders.
+    static func planned(name: String, parent: String) -> (project: URL, email: URL) {
         let parentURL = URL(fileURLWithPath: (parent as NSString).expandingTildeInPath)
         let root = parentURL.appendingPathComponent(sanitizedFolderName(name))
-        let email = try ensure(at: root, mailboxName: name)
-        return (root, email)
+        return (root, root.appendingPathComponent(emailDir))
+    }
+
+    static func createProject(name: String, parent: String) throws -> (project: URL, email: URL) {
+        let planned = planned(name: name, parent: parent)
+        let email = try ensure(at: planned.project, mailboxName: name)
+        return (planned.project, email)
     }
 }

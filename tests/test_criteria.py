@@ -254,8 +254,40 @@ class CriteriaTests(unittest.TestCase):
     def test_invalid_match_raises(self) -> None:
         with self.assertRaises(ValueError):
             parse_match({})
-        with self.assertRaises(ValueError):
-            parse_match({"conjunction": "all", "conditions": []})
+
+    def test_empty_editor_rows_match_nothing(self) -> None:
+        spec = parse_match({"conjunction": "all", "conditions": []})
+        self.assertEqual(spec.groups[0].clauses, [])
+        self.assertFalse(
+            match_message(
+                spec,
+                msg("a@b.com", "Invoice", "hello", "Wed, 5 Mar 2026 10:00:00 +0000"),
+            )
+        )
+        spec = parse_match(
+            {
+                "conjunction": "any",
+                "groups": [
+                    {
+                        "conjunction": "any",
+                        "conditions": [
+                            {
+                                "field": "entire",
+                                "op": "contains",
+                                "values": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(spec.groups[0].clauses, [])
+        self.assertFalse(
+            match_message(
+                spec,
+                msg("a@b.com", "Invoice", "hello", "Wed, 5 Mar 2026 10:00:00 +0000"),
+            )
+        )
 
 
 if __name__ == "__main__":
