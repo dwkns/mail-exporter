@@ -26,6 +26,7 @@ final class AppUpdater: ObservableObject {
 
     private let repo = "dwkns/mail-exporter"
     private var activeRelease: ReleaseInfo?
+    private var dailyGitHubTimer: Timer?
 
     var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
@@ -36,18 +37,45 @@ final class AppUpdater: ObservableObject {
     }
 
     private init() {
+        SparkleController.shared.applyAutomaticChecks(AppPreferences.shared.autoCheckUpdates)
         if AppPreferences.shared.autoCheckUpdates {
+            SparkleController.shared.checkForUpdatesInBackground()
             Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if await Self.sparkleFeedReachable() {
+                    return
+                }
                 await checkForUpdates(silent: true)
                 if updateAvailable {
-                    showUpdateWindow()
+                    showGitHubUpdateWindow()
                 }
+            }
+            startDailyGitHubFallback()
+        }
+    }
+
+    func setAutomaticChecks(_ enabled: Bool) {
+        SparkleController.shared.applyAutomaticChecks(enabled)
+        if enabled {
+            startDailyGitHubFallback()
+        } else {
+            dailyGitHubTimer?.invalidate()
+            dailyGitHubTimer = nil
+        }
+    }
+
+    /// Sparkle when the signed appcast exists; GitHub zip otherwise.
+    func showUpdateWindow() {
+        Task {
+            if await Self.sparkleFeedReachable() {
+                SparkleController.shared.checkForUpdatesUI()
+            } else {
+                showGitHubUpdateWindow()
             }
         }
     }
 
-    func showUpdateWindow() {
+    func showGitHubUpdateWindow() {
         isChecking = true
         errorMessage = nil
         statusMessage = "Checking GitHub for updates…"
@@ -55,6 +83,35 @@ final class AppUpdater: ObservableObject {
         if !isUpdating {
             Task {
                 await checkForUpdates(silent: false)
+            }
+        }
+    }
+
+    static func sparkleFeedReachable() async -> Bool {
+        var req = URLRequest(url: SparkleConfig.feedURL)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 8
+        req.setValue("MailExporter-App", forHTTPHeaderField: "User-Agent")
+        req.setValue("bytes=0-64", forHTTPHeaderField: "Range")
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { return false }
+            return (200...399).contains(http.statusCode)
+        } catch {
+            return false
+        }
+    }
+
+    private func startDailyGitHubFallback() {
+        dailyGitHubTimer?.invalidate()
+        dailyGitHubTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { _ in
+            Task { @MainActor in
+                guard AppPreferences.shared.autoCheckUpdates else { return }
+                if await Self.sparkleFeedReachable() { return }
+                await AppUpdater.shared.checkForUpdates(silent: true)
+                if AppUpdater.shared.updateAvailable {
+                    AppUpdater.shared.showGitHubUpdateWindow()
+                }
             }
         }
     }

@@ -172,6 +172,14 @@ struct UpdatesPreferencesView: View {
             }
 
             Toggle("Automatically check for updates on launch", isOn: $prefs.autoCheckUpdates)
+                .onChange(of: prefs.autoCheckUpdates) { enabled in
+                    updater.setAutomaticChecks(enabled)
+                }
+
+            Text("Sparkle checks when MailExporter opens and again once a day. Until a signed appcast is on GitHub Releases, Check for Updates uses the GitHub zip.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
                 Button {
@@ -180,7 +188,7 @@ struct UpdatesPreferencesView: View {
                     if updater.isChecking {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Checking GitHub…")
+                        Text("Checking…")
                     } else {
                         Text("Check for Updates Now")
                     }
@@ -237,7 +245,7 @@ struct UpdatesPreferencesView: View {
                     .font(.subheadline.weight(.semibold))
                 SecureField("Personal access token", text: $prefs.gitHubToken)
                     .textFieldStyle(.roundedBorder)
-                Text("Stored in Keychain. Only needed if GitHub rate-limits Check for Updates.")
+                Text("Stored in Keychain. Only needed if Sparkle’s appcast is missing and GitHub rate-limits the fallback.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
