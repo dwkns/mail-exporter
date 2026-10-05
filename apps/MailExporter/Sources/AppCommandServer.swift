@@ -130,8 +130,11 @@ enum AppCommandServer {
                 payload["attached"] = counts.attached
                 payload["requested"] = counts.requested
             }
+            DraftNotifier.announce(result, draftCount: 1)
             return jsonLine(payload)
         } catch {
+            let failed = ComposeResult(ok: false, summary: "Compose failed", detail: error.localizedDescription)
+            DraftNotifier.announce(failed, draftCount: 1)
             return jsonLine(["ok": false, "error": error.localizedDescription])
         }
     }
