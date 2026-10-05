@@ -182,7 +182,7 @@ Examples: `001_supplier_inquiry.md`, `014_contractor_quote.md`.
 
 Keep the same filename when moving `Drafts/` → `Sent/`. Move (do not copy or delete) only when an exported `.eml` matches To / Subject / thread — the job must include Sent mail. If it is unclear, leave the file in `Drafts/`.
 
-Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project (prefer `Documents/…`).
+Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space (`a.pdf, b.pdf`). After the draft opens, `compose_draft` / `append-draft` report attached vs requested and do not return a silent OK if they differ.
 
 ---
 

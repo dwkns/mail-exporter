@@ -48,7 +48,7 @@ def test_compose_via_applescript_missing_script(draft_md: Path) -> None:
 def test_compose_via_applescript_runs_osascript(draft_md: Path, tmp_path: Path) -> None:
     script = tmp_path / "MakeMailDraft.applescript"
     script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=0, stdout="OK\n", stderr="")
+    proc = MagicMock(returncode=0, stdout="attached 1 of 1\n", stderr="")
     with (
         patch("engine.compose_draft.applescript_path", return_value=script),
         patch("engine.compose_draft.subprocess.run", return_value=proc) as run,
@@ -61,6 +61,8 @@ def test_compose_via_applescript_runs_osascript(draft_md: Path, tmp_path: Path) 
     assert args[2] == str(draft_md)
     assert result["ok"] is True
     assert result["via"] == "mail"
+    assert result["attached"] == 1
+    assert result["requested"] == 1
 
 
 def test_rejects_absolute_attach_outside_project(tmp_path: Path) -> None:
@@ -99,7 +101,7 @@ def test_parent_relative_attach_escaping_project_is_rejected(tmp_path: Path) -> 
     assert "project" in result["error"].lower()
 
 
-def test_missing_attach_still_opens_mail(tmp_path: Path) -> None:
+def test_missing_attach_still_opens_mail_but_not_ok(tmp_path: Path) -> None:
     md = tmp_path / "d.md"
     md.write_text(
         "---\nTo: a@b.com\nSubject: x\nAttach: gone.pdf\n---\n\nhi\n",
@@ -107,14 +109,66 @@ def test_missing_attach_still_opens_mail(tmp_path: Path) -> None:
     )
     script = tmp_path / "MakeMailDraft.applescript"
     script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=0, stdout="OK\n", stderr="")
+    proc = MagicMock(returncode=2, stdout="", stderr="attached 0 of 1\n")
     with (
         patch("engine.compose_draft.applescript_path", return_value=script),
         patch("engine.compose_draft.subprocess.run", return_value=proc) as run,
     ):
         result = compose_draft(md)
     run.assert_called_once()
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["attached"] == 0
+    assert result["requested"] == 1
+    assert "0 of 1" in result["error"]
+
+
+def test_silent_ok_with_requested_attach_is_refused(tmp_path: Path) -> None:
+    md = tmp_path / "d.md"
+    (tmp_path / "a.pdf").write_bytes(b"%PDF")
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: x\nAttach: a.pdf\n---\n\nhi\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "MakeMailDraft.applescript"
+    script.write_text("-- stub\n", encoding="utf-8")
+    proc = MagicMock(returncode=0, stdout="OK\n", stderr="")
+    with (
+        patch("engine.compose_draft.applescript_path", return_value=script),
+        patch("engine.compose_draft.subprocess.run", return_value=proc),
+    ):
+        result = compose_draft(md)
+    assert result["ok"] is False
+    assert result["requested"] == 1
+    assert "silent OK" in result["error"]
+
+
+def test_partial_attach_count_fails(tmp_path: Path) -> None:
+    md = tmp_path / "d.md"
+    (tmp_path / "a.pdf").write_bytes(b"%PDF")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF")
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: x\nAttach: a.pdf, b.pdf\n---\n\nhi\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "MakeMailDraft.applescript"
+    script.write_text("-- stub\n", encoding="utf-8")
+    proc = MagicMock(returncode=2, stdout="", stderr="attached 1 of 2\n")
+    with (
+        patch("engine.compose_draft.applescript_path", return_value=script),
+        patch("engine.compose_draft.subprocess.run", return_value=proc),
+    ):
+        result = compose_draft(md)
+    assert result["ok"] is False
+    assert result["attached"] == 1
+    assert result["requested"] == 2
+
+
+def test_parse_attach_counts() -> None:
+    from engine.compose_draft import parse_attach_counts
+
+    assert parse_attach_counts("OK") is None
+    assert parse_attach_counts("attached 3 of 3") == (3, 3)
+    assert parse_attach_counts("These attachments…\nattached 0 of 3\n") == (0, 3)
 
 
 def test_compose_markdown_text_persists_into_drafts(

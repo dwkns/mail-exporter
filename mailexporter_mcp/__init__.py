@@ -418,7 +418,12 @@ def compose_draft(path: str = "", markdown: str = "") -> str:
     """Open a Mail draft from a Markdown email file (or inline markdown). Never sends.
 
     Front-matter: To/Cc/Bcc/Subject/From/In-Reply-To/Reply/Attach/Format.
-    Attach paths are relative to the .md file's folder (no ``..``, ``~/``, or absolute).
+    Attach: stays inside the project folder. Prefer ``Documents/…`` from the
+    project root; a file next to the ``.md`` in ``Drafts/`` also works. List
+    several with comma+space (``a.pdf, b.pdf``). Absolute paths are allowed
+    only under the project; ``..`` / ``~/`` that escape it are refused.
+    After Mail opens the draft, the result includes ``attached`` vs
+    ``requested`` and is not OK if they differ.
     Uses AppleScript (native reply quote; GUI Attach Files for reply+attachments).
     """
     try:

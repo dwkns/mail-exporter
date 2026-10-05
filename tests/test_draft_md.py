@@ -174,6 +174,50 @@ def test_resolve_attachments_tilde_denied(tmp_path: Path) -> None:
         resolve_attachments(spec)
 
 
+def test_resolve_attachments_from_drafts_folder(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    drafts.mkdir(parents=True)
+    local = drafts / "note.txt"
+    local.write_text("x", encoding="utf-8")
+    md = drafts / "d.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: x\nAttach: note.txt\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    spec = parse_markdown_draft(md.read_text(encoding="utf-8"), source_path=md)
+    assert resolve_attachments(spec) == [local.resolve()]
+
+
+def test_resolve_attachments_comma_space_documents(tmp_path: Path) -> None:
+    project = tmp_path / "Claim"
+    drafts = project / "Email" / "Drafts"
+    docs = project / "Documents" / "Income"
+    drafts.mkdir(parents=True)
+    docs.mkdir(parents=True)
+    files = [
+        docs / "Payslips.pdf",
+        docs / "P60.pdf",
+        docs / "Bonus.pdf",
+    ]
+    for path in files:
+        path.write_bytes(b"%PDF")
+    md = drafts / "d.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: x\n"
+        "Attach: Documents/Income/Payslips.pdf, Documents/Income/P60.pdf, "
+        "Documents/Income/Bonus.pdf\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    spec = parse_markdown_draft(md.read_text(encoding="utf-8"), source_path=md)
+    assert spec.attach == [
+        "Documents/Income/Payslips.pdf",
+        "Documents/Income/P60.pdf",
+        "Documents/Income/Bonus.pdf",
+    ]
+    assert resolve_attachments(spec) == [path.resolve() for path in files]
+
+
 def test_resolve_attachments_documents_from_project_root(tmp_path: Path) -> None:
     project = tmp_path / "Claim"
     drafts = project / "Email" / "Drafts"

@@ -7,6 +7,38 @@ struct ComposeResult: Equatable {
     var detail: String
 }
 
+enum AttachCountCheck {
+    /// ``attached N of M`` from Make Mail Draft. Nil when the script did not report.
+    static func parse(_ text: String) -> (attached: Int, requested: Int)? {
+        let pattern = #"attached\s+(\d+)\s+of\s+(\d+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges == 3,
+              let attachedRange = Range(match.range(at: 1), in: text),
+              let requestedRange = Range(match.range(at: 2), in: text),
+              let attached = Int(text[attachedRange]),
+              let requested = Int(text[requestedRange])
+        else {
+            return nil
+        }
+        return (attached, requested)
+    }
+
+    static func mismatch(in text: String, requestedHint: Int = 0) -> Bool {
+        if let parsed = parse(text) {
+            return parsed.attached != parsed.requested
+        }
+        if requestedHint > 0 {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty || trimmed == "OK"
+        }
+        return false
+    }
+}
+
 enum ComposeBridge {
     /// Bundled Make Mail Draft AppleScript (reply + GUI Attach Files path).
     static func scriptURL() -> URL? {
@@ -77,15 +109,21 @@ enum ComposeBridge {
         let errText = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-        if process.terminationStatus != 0 {
-            let msg = errText.isEmpty ? outText : errText
-            return ComposeResult(
-                ok: false,
-                summary: "Compose failed",
-                detail: msg.isEmpty
-                    ? "osascript exited \(process.terminationStatus)"
-                    : msg
-            )
+        let blob = [outText, errText].filter { !$0.isEmpty }.joined(separator: "\n")
+        if process.terminationStatus != 0 || AttachCountCheck.mismatch(in: blob) {
+            let msg = blob.isEmpty
+                ? "osascript exited \(process.terminationStatus)"
+                : blob
+            let parsed = AttachCountCheck.parse(blob)
+            let summary: String
+            if let parsed, parsed.attached != parsed.requested {
+                summary = "Attachments missing (\(parsed.attached) of \(parsed.requested))"
+            } else if process.terminationStatus != 0 {
+                summary = "Compose failed"
+            } else {
+                summary = "Attachments missing"
+            }
+            return ComposeResult(ok: false, summary: summary, detail: msg)
         }
 
         let detail = outText.isEmpty || outText == "OK"

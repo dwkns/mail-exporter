@@ -29,7 +29,7 @@ Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`
 
 `export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
 
-`read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder** (prefer `Documents/…`).
+`read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder**. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space. After the draft opens, `compose_draft` / `append-draft` report attached vs requested and fail if they differ.
 
 ## First read
 

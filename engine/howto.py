@@ -125,7 +125,7 @@ From: you@example.com
 Subject: Re: Their subject here
 In-Reply-To: <the-message-id-from-read_message>
 Reply: reply
-Attach: Documents/optional.pdf
+Attach: Documents/optional.pdf, Documents/other.pdf
 ---
 
 Hello,
@@ -144,7 +144,7 @@ Best regards
 | `Subject` | **Required** for rich formatting in Mail. |
 | `In-Reply-To` | `messageId` from `read_message` (keep angle brackets). Opens a real reply if Mail has that message. |
 | `Reply` | `reply` (default when In-Reply-To is set), `reply-all`, or `new`. |
-| `Attach` | File **inside this project**. Prefer `Documents/…` or `Email/Attachments/<id>/…`. Absolute paths are fine if they stay under `{project}`. Paths outside the project, `~/…` to elsewhere, and `..` that escapes the project are refused. |
+| `Attach` | One or more files **inside this project**, comma+space separated (`Documents/a.pdf, Documents/b.pdf`). Prefer `Documents/…` from the project root, or a file next to the `.md` in `Drafts/`. `Email/Attachments/<id>/…` is fine. Absolute paths are allowed only under `{project}`. Paths outside the project, `~/…` to elsewhere, and `..` that escapes the project are refused. After the draft opens, MailExporter counts attachments against this list and will not return a silent OK if they differ. |
 | `Format: plain` | Skip Markdown rendering. |
 
 When the owner says “send it”, open an Apple Mail draft (never send):

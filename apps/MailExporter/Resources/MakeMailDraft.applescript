@@ -68,6 +68,7 @@
 
 property mmdMissing : {}
 property mmdNotes : {}
+property mmdAttachMismatch : false
 
 -- A short record of the last run, written to /tmp/make-mail-draft.log. Only
 -- of interest when something has gone wrong and you want to know which step.
@@ -82,6 +83,7 @@ property mmdBodyStyle : "font-family:Helvetica,Arial,sans-serif;font-size:14px"
 on open theFiles
 	set mmdMissing to {}
 	set mmdNotes to {}
+	set mmdAttachMismatch to false
 	set mmdLogText to ""
 	mmdLog("run: dropped files")
 	repeat with aFile in theFiles
@@ -98,6 +100,7 @@ end open
 on run argv
 	set mmdMissing to {}
 	set mmdNotes to {}
+	set mmdAttachMismatch to false
 	set mmdLogText to ""
 
 	if (count of argv) > 0 then
@@ -107,6 +110,10 @@ on run argv
 		end repeat
 		mmdWriteLog()
 		-- When driven by MailExporter / MCP, return notes as text instead of a dialog.
+		-- Exit 2 when Attach: count and Mail's draft disagree — never a silent OK.
+		if mmdAttachMismatch then
+			error mmdResultText() number 2
+		end if
 		return mmdResultText()
 	end if
 
@@ -281,6 +288,15 @@ on mmdMakeDraft(rawText, baseFolder)
 			set end of mmdMissing to ((oneSpec as text) & "  (" & errMsg & ")")
 		end try
 	end repeat
+	-- Stage copies under /tmp so Go to Folder is not broken by spaces
+	-- in the project path (e.g. Helen Mortgage). Originals are left alone.
+	if (count of foundFiles) > 0 then
+		try
+			set foundFiles to mmdStageAttachments(foundFiles)
+		on error errMsg
+			mmdLog("stage attachments failed: " & errMsg)
+		end try
+	end if
 
 	-- Decide whether we are going the formatted route. An empty body has
 	-- nothing to format, and "Format: plain" opts out entirely.
@@ -461,6 +477,8 @@ on mmdMakeDraft(rawText, baseFolder)
 			mmdAddAttachments(newMessage, foundFiles)
 		end if
 	end if
+
+	mmdCheckAttachmentCount(newMessage, focusSubject, attachSpecs, foundFiles)
 end mmdMakeDraft
 
 
@@ -532,28 +550,48 @@ on mmdReplyWithAttachments(newMessage, foundFiles, focusSubject, clipReady)
 		set end of my mmdNotes to "Reply body clipboard was empty; only the quoted original is in the draft."
 	end if
 
-	set attachFails to {}
-	repeat with aFile in foundFiles
-		set posixPath to POSIX path of aFile
-		if mmdGUIAttachFile(posixPath, focusSubject) then
-			mmdLog("reply+attach GUI ok: " & posixPath)
-		else
-			set end of attachFails to posixPath
-			mmdLog("reply+attach GUI FAIL: " & posixPath)
+	-- AppleScript attach after paste keeps the files; GUI Attach Files was
+	-- returning success without adding them. If the quote is lost we still
+	-- count and refuse a silent OK.
+	mmdAddAttachments(newMessage, foundFiles)
+	set attachedNow to mmdCountMailAttachments(newMessage)
+	if attachedNow < (count of foundFiles) then
+		set attachFails to {}
+		repeat with aFile in foundFiles
+			set posixPath to POSIX path of aFile
+			if not mmdGUIAttachFileVerified(posixPath, focusSubject, newMessage) then
+				set end of attachFails to posixPath
+				mmdLog("reply+attach GUI FAIL: " & posixPath)
+			end if
+			delay 0.25
+		end repeat
+		if (count of attachFails) > 0 then
+			set end of my mmdNotes to "Some attachments could not be added via Attach Files: " & mmdJoinLines(attachFails)
 		end if
-		delay 0.35
-	end repeat
-
-	if (count of attachFails) > 0 then
-		set end of my mmdNotes to "Some attachments could not be added via Attach Files: " & mmdJoinLines(attachFails)
 	end if
 end mmdReplyWithAttachments
+
+
+-- Attach one file and confirm Mail's draft actually gained it (retry once).
+on mmdGUIAttachFileVerified(posixPath, focusSubject, newMessage)
+	set beforeCount to mmdCountAttachments(newMessage, focusSubject, posixPath)
+	repeat with attempt from 1 to 2
+		if mmdGUIAttachFile(posixPath, focusSubject) then
+			delay 0.55
+			set afterCount to mmdCountAttachments(newMessage, focusSubject, posixPath)
+			if afterCount > beforeCount then return true
+			mmdLog("reply+attach count did not rise (was " & beforeCount & ")")
+		end if
+		delay 0.7
+	end repeat
+	return false
+end mmdGUIAttachFileVerified
 
 
 -- Open File → Attach Files…, go to the file path, confirm Choose File / Open.
 on mmdGUIAttachFile(posixPath, focusSubject)
 	tell application "Mail" to activate
-	delay 0.2
+	delay 0.35
 	try
 		tell application "System Events"
 			tell process "Mail"
@@ -601,13 +639,33 @@ on mmdGUIAttachFile(posixPath, focusSubject)
 				set frontmost to true
 				-- Go to Folder with the absolute file path (avoids iCloud Desktop confusion)
 				keystroke "g" using {command down, shift down}
-				delay 0.85
-				keystroke "a" using {command down}
-				delay 0.05
-				keystroke posixPath
-				delay 0.15
+				delay 0.7
+				set goSheet to missing value
+				try
+					if (count of sheets of sheet 1 of window 1) > 0 then
+						set goSheet to sheet 1 of sheet 1 of window 1
+					end if
+				end try
+				if goSheet is missing value then
+					try
+						if (count of sheets of window 1) > 1 then set goSheet to sheet 2 of window 1
+					end try
+				end if
+				set typed to false
+				if goSheet is not missing value then
+					try
+						set value of text field 1 of goSheet to posixPath
+						set typed to true
+					end try
+				end if
+				if not typed then
+					keystroke "a" using {command down}
+					delay 0.05
+					keystroke posixPath
+				end if
+				delay 0.25
 				keystroke return
-				delay 1.0
+				delay 0.9
 				-- Confirm
 				set clicked to false
 				try
@@ -695,6 +753,97 @@ on mmdAddAttachments(newMessage, foundFiles)
 		end if
 	end repeat
 end mmdAddAttachments
+
+
+on mmdStageAttachments(foundFiles)
+	set tmpDir to do shell script "/usr/bin/mktemp -d -t mailexporter-attach"
+	set staged to {}
+	set i to 1
+	repeat with aFile in foundFiles
+		set src to POSIX path of aFile
+		set base to mmdFileNameOfPOSIX(src)
+		set dest to tmpDir & "/" & i & "-" & base
+		do shell script "/bin/cp -p " & quoted form of src & " " & quoted form of dest
+		set end of staged to (POSIX file dest as alias)
+		set i to i + 1
+	end repeat
+	mmdLog("staged attachments in " & tmpDir)
+	return staged
+end mmdStageAttachments
+
+on mmdFileNameOfPOSIX(posixPath)
+	set lastSlash to 0
+	repeat with i from (length of posixPath) to 1 by -1
+		if character i of posixPath is "/" then
+			set lastSlash to i
+			exit repeat
+		end if
+	end repeat
+	if lastSlash is 0 then return posixPath
+	if lastSlash is (length of posixPath) then return posixPath
+	return text (lastSlash + 1) thru -1 of posixPath
+end mmdFileNameOfPOSIX
+
+on mmdCountMailAttachments(newMessage)
+	try
+		tell application "Mail"
+			return count of mail attachments of newMessage
+		end tell
+	end try
+	try
+		tell application "Mail"
+			return count of mail attachments of content of newMessage
+		end tell
+	end try
+	return 0
+end mmdCountMailAttachments
+
+on mmdWindowHasFilename(expectedTitle, fileName)
+	if expectedTitle is "" or fileName is "" then return false
+	try
+		tell application "System Events"
+			tell process "Mail"
+				if not (exists window expectedTitle) then return false
+				repeat with b in buttons of window expectedTitle
+					try
+						set nm to name of b as text
+						if nm is fileName or nm contains fileName then return true
+					end try
+				end repeat
+			end tell
+		end tell
+	end try
+	return false
+end mmdWindowHasFilename
+
+on mmdCountAttachments(newMessage, expectedTitle, posixHint)
+	set n to mmdCountMailAttachments(newMessage)
+	if posixHint is not "" then
+		set fileName to mmdFileNameOfPOSIX(posixHint)
+		if mmdWindowHasFilename(expectedTitle, fileName) then
+			if n < 1 then set n to 1
+		end if
+	end if
+	return n
+end mmdCountAttachments
+
+on mmdCheckAttachmentCount(newMessage, focusSubject, attachSpecs, foundFiles)
+	set requestedCount to count of attachSpecs
+	if requestedCount is 0 then return
+	delay 0.45
+	set attachedCount to mmdCountMailAttachments(newMessage)
+	if attachedCount < requestedCount and (count of foundFiles) > 0 then
+		set namedCount to 0
+		repeat with aFile in foundFiles
+			set fileName to mmdFileNameOfPOSIX(POSIX path of aFile)
+			if mmdWindowHasFilename(focusSubject, fileName) then set namedCount to namedCount + 1
+		end repeat
+		if namedCount > attachedCount then set attachedCount to namedCount
+	end if
+	set end of mmdNotes to "attached " & attachedCount & " of " & requestedCount
+	mmdLog("attach count: " & attachedCount & " of " & requestedCount)
+	if attachedCount is not requestedCount then set mmdAttachMismatch to true
+end mmdCheckAttachmentCount
 
 
 -- Normalize Message-ID to include angle brackets (Mail usually stores them).

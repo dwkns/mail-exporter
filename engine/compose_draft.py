@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
-import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from engine.draft_md import parse_markdown_draft, resolve_attachments
+
+_ATTACHED_RE = re.compile(r"attached\s+(\d+)\s+of\s+(\d+)", re.I)
+
+
+def parse_attach_counts(text: str) -> tuple[int, int] | None:
+    """Parse ``attached N of M`` from Make Mail Draft output."""
+    match = _ATTACHED_RE.search(text or "")
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
 
 INSTALLED_APP_SCRIPT = Path(
     "/Applications/MailExporter.app/Contents/Resources/MakeMailDraft.applescript"
@@ -63,12 +73,15 @@ def compose_via_applescript(md_path: Path) -> dict:
     script = applescript_path()
     if script is None:
         return {"ok": False, "via": "mail", "error": "MakeMailDraft.applescript not found"}
-    # Reject absolute/~ Attach: paths before Mail (missing files still open).
+    # Reject paths outside the project before Mail (missing files still open).
+    requested = 0
+    resolved: list[Path] = []
     try:
         text = md_path.read_text(encoding="utf-8")
         spec = parse_markdown_draft(text, source_path=md_path)
+        requested = len(spec.attach)
         if spec.attach:
-            resolve_attachments(spec)
+            resolved = resolve_attachments(spec)
     except (OSError, ValueError) as exc:
         return {"ok": False, "via": "mail", "error": str(exc), "path": str(md_path)}
 
@@ -79,14 +92,40 @@ def compose_via_applescript(md_path: Path) -> dict:
     )
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
-    return {
-        "ok": proc.returncode == 0,
+    blob = f"{out}\n{err}".strip()
+    parsed = parse_attach_counts(blob)
+    attached = parsed[0] if parsed else None
+    if parsed:
+        requested = parsed[1]
+    mismatch = False
+    if requested:
+        if parsed:
+            mismatch = attached != requested
+        else:
+            # Old script returned silent OK and never reported counts.
+            mismatch = True
+    ok = proc.returncode == 0 and not mismatch
+    payload: dict = {
+        "ok": ok,
         "via": "mail",
         "path": str(md_path),
-        "result": out or "OK",
+        "result": out or err or "OK",
         "stderr": err or None,
         "exit": proc.returncode,
+        "attached": attached,
+        "requested": requested,
+        "resolved": [str(path) for path in resolved],
     }
+    if mismatch:
+        if parsed:
+            payload["error"] = f"attached {attached} of {requested}"
+        else:
+            payload["error"] = (
+                f"attached unknown of {requested}; refused silent OK"
+            )
+            if not out:
+                payload["result"] = payload["error"]
+    return payload
 
 
 def compose_draft(md_path: Path, **_kwargs) -> dict:
