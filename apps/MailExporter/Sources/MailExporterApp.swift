@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 extension Notification.Name {
@@ -84,9 +85,7 @@ struct MailExporterApp: App {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") {
-                    AppUpdater.shared.showUpdateWindow()
-                }
+                CheckForUpdatesView(updater: SparkleController.shared.updater)
             }
         }
 
@@ -112,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSWindow.allowsAutomaticWindowTabbing = false
         EngineBridge.prewarm()
+        _ = AppUpdater.shared
         // Finder sometimes passes paths as argv when launching by drop.
         let argvFiles = CommandLine.arguments.dropFirst().compactMap { arg -> URL? in
             if arg.hasPrefix("-") { return nil }

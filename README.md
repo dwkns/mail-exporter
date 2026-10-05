@@ -219,6 +219,20 @@ MailExporter must stay on your Mac (it reads `~/Library/Mail`). Cowork can use i
 
 Do **not** add this server under **Customize → Connectors → Add custom connector**. That path is for remote MCP URLs.
 
+## Updates
+
+MailExporter uses [Sparkle](https://sparkle-project.org) to check for updates on launch and once a day. Use **Check for Updates…** in the app menu or Settings → Updates.
+
+The feed is `https://github.com/dwkns/mail-exporter/releases/latest/download/appcast.xml`. EdDSA signing and Developer ID / notarization happen on the Mac Mini — private keys are not in this repo. CI still publishes a helper-only `MailExporter-macOS-arm64.zip`. Until `appcast.xml` is on the latest Release, Check for Updates falls back to that GitHub zip (SHA-256 + codesign).
+
+After a `v*` tag, on the Mini only:
+
+```bash
+./scripts/sparkle-publish-on-mini.sh vX.Y.Z
+```
+
+See `apps/MailExporter/signing/SPARKLE.md`.
+
 ## Safety
 
 This project only **reads** Mail data and writes `.eml` files to folders you choose. It never deletes messages from Apple Mail. Treat export folders as private mail. IMAP/Gmail drafts created in Mail may upload to the server — “never sends” is not “never leaves this Mac.”
@@ -231,3 +245,5 @@ This project only **reads** Mail data and writes `.eml` files to folders you cho
 | [`engine/`](engine/) | Python export engine (criteria matching, `.emlx` + attachments) |
 | [`mailexporter_mcp/`](mailexporter_mcp/) | Local MCP server for Cursor / Claude / Cowork |
 | [`skills/mail-exporter/`](skills/mail-exporter/) | Cursor/Claude skill (howto, never-send) |
+| [`scripts/sparkle-publish-on-mini.sh`](scripts/sparkle-publish-on-mini.sh) | Mini-only Developer ID + EdDSA appcast |
+| [`apps/MailExporter/signing/SPARKLE.md`](apps/MailExporter/signing/SPARKLE.md) | Where the Mini keys live |

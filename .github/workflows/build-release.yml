@@ -36,6 +36,7 @@ jobs:
 
       - name: Typecheck Swift UI
         run: |
+          SPARKLE_DIR="$(./apps/MailExporter/ensure-sparkle.sh)"
           SRC="apps/MailExporter/Sources"
           SWIFT_FILES=()
           while IFS= read -r -d '' f; do
@@ -46,7 +47,9 @@ jobs:
             -typecheck \
             -sdk "$(xcrun --show-sdk-path)" \
             -target arm64-apple-macos13 \
-            -parse-as-library
+            -parse-as-library \
+            -F "${SPARKLE_DIR}" \
+            -framework Sparkle
 
   build:
     name: Build MailExporter macOS App
@@ -92,6 +95,16 @@ jobs:
           shasum -a 256 MailExporter-macOS-arm64.zip > MailExporter-macOS-arm64.zip.sha256
           echo "SHA256: $(cat MailExporter-macOS-arm64.zip.sha256)"
           codesign --verify --verbose=2 MailExporter.app 2>&1 | tail -8 || true
+          VERSION="$(defaults read "$(pwd)/MailExporter.app/Contents/Info" CFBundleShortVersionString)"
+          BUILD="$(defaults read "$(pwd)/MailExporter.app/Contents/Info" CFBundleVersion)"
+          TAG="v${VERSION}"
+          python3 ../../scripts/generate-appcast-unsigned.py \
+            --zip MailExporter-macOS-arm64.zip \
+            --version "${VERSION}" \
+            --build "${BUILD}" \
+            --tag "${TAG}" \
+            --out appcast.unsigned.xml
+          echo "Wrote unsigned appcast (no EdDSA). Mini publishes appcast.xml."
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -100,6 +113,7 @@ jobs:
           path: |
             apps/MailExporter/MailExporter-macOS-arm64.zip
             apps/MailExporter/MailExporter-macOS-arm64.zip.sha256
+            apps/MailExporter/appcast.unsigned.xml
           retention-days: 30
 
       - name: Create GitHub Release
@@ -110,4 +124,5 @@ jobs:
           files: |
             apps/MailExporter/MailExporter-macOS-arm64.zip
             apps/MailExporter/MailExporter-macOS-arm64.zip.sha256
+            apps/MailExporter/appcast.unsigned.xml
           generate_release_notes: true
