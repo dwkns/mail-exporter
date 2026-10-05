@@ -438,12 +438,12 @@ def run_job(
         digest = hashlib.sha256(raw_bytes).hexdigest()[:16]
         old_name = files.get(sid)
         old_path = output_dir / old_name if old_name else None
-        if (
-            not force_full
-            and old_path is not None
-            and old_path.is_file()
-            and source_hashes.get(sid) == digest
-        ):
+        already = old_path is not None and old_path.is_file()
+        stored = source_hashes.get(sid)
+        # A copy that is already in the folder is not new. A missing stamp
+        # only means this is the first run after the count was added.
+        if not force_full and already and (stored is None or stored == digest):
+            source_hashes[sid] = digest
             continue
         t_a = time.perf_counter()
         try:
@@ -474,7 +474,8 @@ def run_job(
             continue
         files[sid] = filename
         source_hashes[sid] = digest
-        newly_written += 1
+        if not already:
+            newly_written += 1
         attachments_filled += filled
         sidecar_written += write_attachments_sidecar(output_dir, sid, path)
 

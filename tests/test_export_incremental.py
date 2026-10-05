@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from engine.criteria import parse_match
@@ -136,9 +137,27 @@ def test_refresh_when_message_changes(tmp_path: Path, monkeypatch) -> None:
     run_job(job)
     p1.write_bytes(_emlx(_rfc822(mid="<a@x>", subject="Your invoice", body="hello invoice updated")))
     again = run_job(job)
-    assert again["newlyWritten"] == 1
+    assert again["newlyWritten"] == 0
     text = list(Path(job.output_dir).glob("*.eml"))[0].read_text(encoding="utf-8")
     assert "updated" in text
+
+
+def test_existing_copy_without_stamp_is_not_new(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(mail, "1.emlx", _rfc822(mid="<a@x>", subject="Your invoice"))
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    run_job(job)
+    out = Path(job.output_dir)
+    state_path = out / ".exported-ids.json"
+    state = load_state(state_path)
+    state.pop("sourceHashes", None)
+    state_path.write_text(json.dumps(state) + "\n", encoding="utf-8")
+    again = run_job(job)
+    assert again["newlyWritten"] == 0
+    assert again["line"] == "Up to date"
+    saved = load_state(state_path)
+    assert saved.get("sourceHashes")
 
 
 def test_prune_when_message_stops_matching(tmp_path: Path, monkeypatch) -> None:
