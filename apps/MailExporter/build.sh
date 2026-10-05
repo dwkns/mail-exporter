@@ -24,6 +24,22 @@ fi
 
 echo "Signing identity: ${SIGN_IDENTITY}"
 
+# Disk access sticks only while this stamp stays the same. Refuse before the
+# long build if this run would replace the installed app with a different one.
+INSTALLED_APP="/Applications/MailExporter.app"
+if [[ -d "${INSTALLED_APP}" ]]; then
+  INSTALLED_AUTHORITY="$(codesign -dvv "${INSTALLED_APP}" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+  if [[ -n "${INSTALLED_AUTHORITY}" && "${SIGN_IDENTITY}" != "${INSTALLED_AUTHORITY}" ]]; then
+    echo "MailExporter in Applications is already approved as:" >&2
+    echo "  ${INSTALLED_AUTHORITY}" >&2
+    echo "This build would stamp it as:" >&2
+    echo "  ${SIGN_IDENTITY}" >&2
+    echo "Refusing. A different stamp makes macOS ask for disk access again." >&2
+    echo "Run the build without SIGN_IDENTITY to keep the current stamp." >&2
+    exit 1
+  fi
+fi
+
 RG_VERSION="15.2.0"
 VENDOR_RG_DIR="${ROOT}/vendor/rg"
 VENDOR_RG="${VENDOR_RG_DIR}/rg"
@@ -539,10 +555,32 @@ echo ""
 echo "Built (self-contained): ${APP}"
 
 DEST_APP="/Applications/MailExporter.app"
+# macOS ties disk access to the app's signature stamp (the designated
+# requirement), not its name. Deleting /Applications/MailExporter.app and
+# copying a new one, or signing it with a different certificate, makes the
+# Mac treat it as a different app and ask for permission again.
+designated_requirement() {
+  codesign -d -r- "$1" 2>&1 | sed -n 's/^designated => //p' | head -1
+}
+
 if [[ -d "/Applications" ]]; then
-  echo "Copying to ${DEST_APP}…"
+  NEW_REQ="$(designated_requirement "${APP}")"
+  FIRST_INSTALL=0
+  if [[ -d "${DEST_APP}" ]]; then
+    OLD_REQ="$(designated_requirement "${DEST_APP}")"
+    if [[ -n "${OLD_REQ}" && "${OLD_REQ}" != "${NEW_REQ}" ]]; then
+      echo "Leaving ${DEST_APP} in place." >&2
+      echo "The new build is stamped differently, so replacing it would make macOS ask for disk access again." >&2
+      echo "New build left at: ${APP}" >&2
+      exit 1
+    fi
+  else
+    FIRST_INSTALL=1
+  fi
+
+  echo "Updating ${DEST_APP}…"
   if pgrep -x MailExporter >/dev/null 2>&1; then
-    echo "Quitting running MailExporter so the install can be replaced…"
+    echo "Quitting running MailExporter so the install can be updated…"
     osascript -e 'tell application "MailExporter" to quit' 2>/dev/null || true
     for _ in 1 2 3 4 5; do
       pgrep -x MailExporter >/dev/null 2>&1 || break
@@ -553,14 +591,20 @@ if [[ -d "/Applications" ]]; then
       exit 1
     fi
   fi
-  rm -rf "${DEST_APP}"
-  ditto "${APP}" "${DEST_APP}"
+  if [[ "${FIRST_INSTALL}" == "1" ]]; then
+    ditto "${APP}" "${DEST_APP}"
+  else
+    # Keep the same folder the Mac already approved. Only replace what is inside it.
+    find "${DEST_APP}" -mindepth 1 -delete
+    ditto "${APP}/" "${DEST_APP}/"
+  fi
   INSTALLED="$(defaults read "${DEST_APP}/Contents/Info" CFBundleShortVersionString)"
-  echo "Copied to ${DEST_APP} (CFBundleShortVersionString ${INSTALLED})"
+  echo "Updated ${DEST_APP} (CFBundleShortVersionString ${INSTALLED})"
   if [[ "${INSTALLED}" != "${VERSION}" ]]; then
     echo "error: ${DEST_APP} is ${INSTALLED}, expected ${VERSION}" >&2
     exit 1
   fi
+  if [[ "${FIRST_INSTALL}" == "1" ]]; then
+    echo "Grant Full Disk Access only to MailExporter.app, then reopen it."
+  fi
 fi
-
-echo "Grant Full Disk Access only to MailExporter.app, then reopen it."
