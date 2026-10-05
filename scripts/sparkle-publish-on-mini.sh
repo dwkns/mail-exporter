@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# Publish a Developer ID + EdDSA-signed Sparkle update.
-# Run ONLY on dwkns-mini-m1. Never copy the private key off this Mac.
+# Publish a Developer ID + EdDSA-signed Sparkle update for other Macs.
+# Runs on any Mac that already has the Developer ID certificate and the
+# Sparkle private key. Does not replace /Applications/MailExporter.app.
+# The filename still says mini; that machine is headless and is not required.
 set -euo pipefail
 
 TAG="${1:?usage: sparkle-publish-on-mini.sh vX.Y.Z}"
 [[ "${TAG}" == v* ]] || TAG="v${TAG}"
 
 HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
-if [[ "${HOST}" != *mini-m1* && "${HOST}" != *mini* ]]; then
-  echo "error: this script must run on dwkns-mini-m1 (host is ${HOST})." >&2
-  exit 1
-fi
 
 if ! security find-identity -v -p codesigning | grep -q 'Developer ID Application: Darrell Wilkins'; then
   echo "error: Developer ID Application for Darrell Wilkins is not in this keychain." >&2
@@ -27,12 +25,18 @@ ENTITLEMENTS_HELPER=""
 
 if [[ ! -f "${PRIV}" ]]; then
   echo "error: Sparkle EdDSA private key missing at ${PRIV}" >&2
-  echo "Generate it on this Mini only (never copy it to a laptop)." >&2
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ ! -x "${TOOLS}/bin/generate_appcast" || ! -x "${TOOLS}/bin/sign_update" ]]; then
-  echo "error: Sparkle tools missing under ${TOOLS}. Extract Sparkle-2.9.6.tar.xz there." >&2
+  VENDOR_BIN="${SCRIPT_DIR}/../apps/MailExporter/vendor/sparkle/bin"
+  if [[ -x "${VENDOR_BIN}/generate_appcast" && -x "${VENDOR_BIN}/sign_update" ]]; then
+    TOOLS="${SCRIPT_DIR}/../apps/MailExporter/vendor/sparkle"
+  fi
+fi
+if [[ ! -x "${TOOLS}/bin/generate_appcast" || ! -x "${TOOLS}/bin/sign_update" ]]; then
+  echo "error: Sparkle tools missing under ${TOOLS}." >&2
   exit 1
 fi
 

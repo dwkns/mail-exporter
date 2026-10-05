@@ -1,36 +1,20 @@
-# Sparkle signing (Mac Mini only)
+# Updates
 
-Developer ID, the Sparkle EdDSA **private** key, and notarization credentials live on **dwkns-mini-m1**. Never copy them onto a laptop or into git.
+The app on the Mac you use is updated in place by `apps/MailExporter/build.sh`. That keeps the stamp macOS already approved, so disk access is not asked for again.
 
-The public key is committed as `apps/MailExporter/sparkle-public-ed-key.txt` (`SUPublicEDKey`).
+A download for another Mac is a separate file. It is signed with Developer ID and is not copied onto the app you already use.
 
-## On the Mini (once)
+Publish that download from any Mac that already has both of these:
 
-1. Sparkle 2.9.6 tools: `~/Library/Application Support/MailExporter/sparkle-tools` (`bin/generate_appcast`, `bin/sign_update`).
-2. EdDSA private key file (mode `600`):
+- Developer ID Application: Darrell Wilkins (LD2427W529)
+- `~/Library/Application Support/MailExporter/sparkle-ed25519-private.txt`
 
-   `~/Library/Application Support/MailExporter/sparkle-ed25519-private.txt`
-
-   Base64 of the 32-byte Ed25519 seed. `sign_update --ed-key-file` reads it. Do not `scp` this file.
-3. Optional Keychain import (GUI session; SSH hits `errSecInteractionNotAllowed` / `-25308`):
-
-   `sparkle-tools/bin/generate_keys --account MailExporter -f ~/Library/Application\ Support/MailExporter/sparkle-ed25519-private.txt`
-4. Notarization profile (optional but needed for Gatekeeper):
-
-   `xcrun notarytool store-credentials MailExporter --apple-id … --team-id LD2427W529`
-
-## After each `v*` GitHub Release
-
-CI already attached the helper-only `MailExporter-macOS-arm64.zip`. On the Mini:
+Sparkle’s `sign_update` and `generate_appcast` are in `apps/MailExporter/vendor/sparkle/bin`.
 
 ```bash
 ./scripts/sparkle-publish-on-mini.sh vX.Y.Z
 ```
 
-That re-signs the CI zip with Developer ID (helper-only entitlements), notarizes when the profile exists, EdDSA-signs the archive, and uploads `MailExporter-macOS-arm64-sparkle.zip` plus `appcast.xml` to the same tag. The CI zip is not replaced.
+The script name still says mini. The Mini does not have to be involved. Nobody needs to sit at a keyboard. The script does not replace `/Applications/MailExporter.app`.
 
-The app’s `SUFeedURL` is:
-
-`https://github.com/dwkns/mail-exporter/releases/latest/download/appcast.xml`
-
-Until that asset exists, Check for Updates falls back to the existing GitHub zip + SHA-256 path.
+Notarization runs only when a keychain profile named `MailExporter` is already stored. Without it, the download is still signed, and another Mac may ask the person to confirm before opening it the first time.

@@ -16,12 +16,17 @@ final class SparkleController {
     var updater: SPUUpdater { controller.updater }
 
     private init() {
+        // Sparkle replaces the whole app. Only turn that on when this copy is
+        // already the public stamp. The personal app stays on the safe checker,
+        // which refuses a download that would make macOS ask for disk access again.
+        let sparkleMayReplace = AppStamp.isDeveloperIDApplication()
         controller = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: sparkleMayReplace,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
-        controller.updater.automaticallyChecksForUpdates = AppPreferences.shared.autoCheckUpdates
+        controller.updater.automaticallyChecksForUpdates =
+            sparkleMayReplace && AppPreferences.shared.autoCheckUpdates
     }
 
     func applyAutomaticChecks(_ enabled: Bool) {

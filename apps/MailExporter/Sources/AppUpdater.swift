@@ -2,6 +2,49 @@ import AppKit
 import Foundation
 import SwiftUI
 
+enum AppStamp {
+    static func isDeveloperIDApplication(_ url: URL = Bundle.main.bundleURL) -> Bool {
+        (try? authority(url))?.contains("Developer ID Application:") == true
+    }
+
+    static func designatedRequirement(_ url: URL) throws -> String {
+        let text = try codesign(["-d", "-r-", url.path])
+        guard let line = text.split(separator: "\n").first(where: { $0.hasPrefix("designated => ") }) else {
+            throw NSError(
+                domain: "AppUpdater",
+                code: 12,
+                userInfo: [NSLocalizedDescriptionKey: "Could not read the app’s signature stamp."]
+            )
+        }
+        return String(line.dropFirst("designated => ".count))
+    }
+
+    private static func authority(_ url: URL) throws -> String {
+        try codesign(["-dv", url.path])
+    }
+
+    /// codesign writes these details to stderr.
+    private static func codesign(_ arguments: [String]) throws -> String {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        proc.arguments = arguments
+        let err = Pipe()
+        proc.standardError = err
+        proc.standardOutput = FileHandle.nullDevice
+        try proc.run()
+        proc.waitUntilExit()
+        let text = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if proc.terminationStatus != 0 {
+            throw NSError(
+                domain: "AppUpdater",
+                code: 13,
+                userInfo: [NSLocalizedDescriptionKey: "codesign failed. \(text)"]
+            )
+        }
+        return text
+    }
+}
+
 struct ReleaseInfo {
     var tag: String
     var name: String
@@ -37,8 +80,11 @@ final class AppUpdater: ObservableObject {
     }
 
     private init() {
-        SparkleController.shared.applyAutomaticChecks(AppPreferences.shared.autoCheckUpdates)
-        if AppPreferences.shared.autoCheckUpdates {
+        let sparkleMayReplace = AppStamp.isDeveloperIDApplication()
+        SparkleController.shared.applyAutomaticChecks(
+            sparkleMayReplace && AppPreferences.shared.autoCheckUpdates
+        )
+        if sparkleMayReplace && AppPreferences.shared.autoCheckUpdates {
             SparkleController.shared.checkForUpdatesInBackground()
             Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -55,8 +101,9 @@ final class AppUpdater: ObservableObject {
     }
 
     func setAutomaticChecks(_ enabled: Bool) {
-        SparkleController.shared.applyAutomaticChecks(enabled)
-        if enabled {
+        let allowSparkle = enabled && AppStamp.isDeveloperIDApplication()
+        SparkleController.shared.applyAutomaticChecks(allowSparkle)
+        if allowSparkle {
             startDailyGitHubFallback()
         } else {
             dailyGitHubTimer?.invalidate()
@@ -64,10 +111,11 @@ final class AppUpdater: ObservableObject {
         }
     }
 
-    /// Sparkle when the signed appcast exists; GitHub zip otherwise.
+    /// Sparkle only for a public-stamped app. The personal app never lets an
+    /// update delete it and install a differently stamped copy.
     func showUpdateWindow() {
         Task {
-            if await Self.sparkleFeedReachable() {
+            if AppStamp.isDeveloperIDApplication(), await Self.sparkleFeedReachable() {
                 SparkleController.shared.checkForUpdatesUI()
             } else {
                 showGitHubUpdateWindow()
@@ -401,23 +449,38 @@ final class AppUpdater: ObservableObject {
             }
 
             try verifyCodesign(newAppURL)
+            let currentRequirement = try AppStamp.designatedRequirement(Bundle.main.bundleURL)
+            let updateRequirement = try AppStamp.designatedRequirement(newAppURL)
+            guard currentRequirement == updateRequirement else {
+                throw NSError(
+                    domain: "AppUpdater",
+                    code: 11,
+                    userInfo: [NSLocalizedDescriptionKey: "This download is stamped differently from the app you are using. Installing it would make the Mac ask for disk access again, so the app was left as it is."]
+                )
+            }
 
-            // Current target app bundle to replace
             let targetBundlePath = Bundle.main.bundleURL.path
-
             statusMessage = "Relaunching into updated version…"
 
-            // Execute detached script to replace running app and relaunch
+            // Paths are arguments, not part of the script text. The folder the
+            // Mac already approved stays; only its contents are replaced.
+            let scriptURL = tmpDir.appendingPathComponent("replace-in-place.sh")
             let script = """
+            #!/bin/bash
+            set -euo pipefail
+            target="$1"
+            source="$2"
             sleep 1
-            rm -rf "\(targetBundlePath)"
-            ditto "\(newAppURL.path)" "\(targetBundlePath)"
-            open "\(targetBundlePath)"
+            find "$target" -mindepth 1 -delete
+            ditto "$source/" "$target/"
+            open "$target"
             """
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
             let replaceProc = Process()
-            replaceProc.executableURL = URL(fileURLWithPath: "/bin/sh")
-            replaceProc.arguments = ["-c", script]
+            replaceProc.executableURL = URL(fileURLWithPath: "/bin/bash")
+            replaceProc.arguments = [scriptURL.path, targetBundlePath, newAppURL.path]
             try replaceProc.run()
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

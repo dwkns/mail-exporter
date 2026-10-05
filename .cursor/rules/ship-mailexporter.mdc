@@ -54,6 +54,6 @@ NEXT="v${MAJOR}.${MINOR}.${PATCH}"
 ## Notes
 
 - A plain `main` push builds CI artifacts but does **not** create a GitHub Release; in-app updates need a real Release with the zip.
-- After the `v*` Release exists, Sparkle still needs the Mini (`dwkns-mini-m1`) to run `scripts/sparkle-publish-on-mini.sh "${NEXT}"`. That uploads `appcast.xml` and a Developer ID zip. Leave the CI helper-only zip in place. Never copy Developer ID / Sparkle private keys onto a laptop or into git.
+- The app in `/Applications` is the one the user runs. `build.sh` keeps its stamp. Do not install the GitHub zip or a Developer ID build over it.
+- A download for another Mac is separate. `scripts/sparkle-publish-on-mini.sh "${NEXT}"` can run on any Mac that already has the Developer ID certificate and the Sparkle key. The Mini is headless and is not required. That script must not replace `/Applications/MailExporter.app`.
 - Tell the user the new tag, that CI will publish the release, and the `CFBundleShortVersionString` now in `/Applications`.
-- Local signing still depends on the machine’s Apple signing setup; CI signing follows the workflow secrets.

@@ -221,17 +221,15 @@ Do **not** add this server under **Customize → Connectors → Add custom conne
 
 ## Updates
 
-MailExporter uses [Sparkle](https://sparkle-project.org) to check for updates on launch and once a day. Use **Check for Updates…** in the app menu or Settings → Updates.
+The app you use is updated in place by `./apps/MailExporter/build.sh`. That keeps the stamp macOS already approved.
 
-The feed is `https://github.com/dwkns/mail-exporter/releases/latest/download/appcast.xml`. EdDSA signing and Developer ID / notarization happen on the Mac Mini — private keys are not in this repo. CI still publishes a helper-only `MailExporter-macOS-arm64.zip`. Until `appcast.xml` is on the latest Release, Check for Updates falls back to that GitHub zip (SHA-256 + codesign).
-
-After a `v*` tag, on the Mini only:
+**Check for Updates** will not replace that app with a download stamped differently. A download for another Mac is published separately and is not copied on top of the app you use.
 
 ```bash
 ./scripts/sparkle-publish-on-mini.sh vX.Y.Z
 ```
 
-See `apps/MailExporter/signing/SPARKLE.md`.
+That command can run on any Mac that already has the Developer ID certificate and the Sparkle key. The Mini is not required. See `apps/MailExporter/signing/SPARKLE.md`.
 
 ## Safety
 
@@ -245,5 +243,5 @@ This project only **reads** Mail data and writes `.eml` files to folders you cho
 | [`engine/`](engine/) | Python export engine (criteria matching, `.emlx` + attachments) |
 | [`mailexporter_mcp/`](mailexporter_mcp/) | Local MCP server for Cursor / Claude / Cowork |
 | [`skills/mail-exporter/`](skills/mail-exporter/) | Cursor/Claude skill (howto, never-send) |
-| [`scripts/sparkle-publish-on-mini.sh`](scripts/sparkle-publish-on-mini.sh) | Mini-only Developer ID + EdDSA appcast |
-| [`apps/MailExporter/signing/SPARKLE.md`](apps/MailExporter/signing/SPARKLE.md) | Where the Mini keys live |
+| [`scripts/sparkle-publish-on-mini.sh`](scripts/sparkle-publish-on-mini.sh) | Publish a download for another Mac. Does not replace the app you use. |
+| [`apps/MailExporter/signing/SPARKLE.md`](apps/MailExporter/signing/SPARKLE.md) | How that download is signed |

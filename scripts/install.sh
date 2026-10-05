@@ -35,12 +35,30 @@ ZIP_PATH="${TMP_DIR}/MailExporter-macOS-arm64.zip"
 SUM_PATH="${TMP_DIR}/MailExporter-macOS-arm64.zip.sha256"
 DOWNLOADED=0
 
+install_preserving_approval() {
+  local src="$1"
+  local dest="${DEST_DIR}/${APP_NAME}"
+  local new_req old_req
+  new_req="$(codesign -d -r- "${src}" 2>&1 | sed -n 's/^designated => //p' | head -1)"
+  if [[ -d "${dest}" ]]; then
+    old_req="$(codesign -d -r- "${dest}" 2>&1 | sed -n 's/^designated => //p' | head -1)"
+    if [[ -n "${old_req}" && "${old_req}" != "${new_req}" ]]; then
+      echo "Leaving ${dest} in place." >&2
+      echo "The new app is stamped differently, so replacing it would make the Mac ask for disk access again." >&2
+      exit 1
+    fi
+    find "${dest}" -mindepth 1 -delete
+    ditto "${src}/" "${dest}/"
+  else
+    ditto "${src}" "${dest}"
+  fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 LOCAL_APP="${SCRIPT_DIR}/../apps/MailExporter/MailExporter.app"
 if [[ -d "${LOCAL_APP}" ]]; then
-  echo "Found local build at ${LOCAL_APP}. Copying…"
-  rm -rf "${DEST_DIR}/${APP_NAME}"
-  cp -R "${LOCAL_APP}" "${DEST_DIR}/${APP_NAME}"
+  echo "Found local build at ${LOCAL_APP}. Updating…"
+  install_preserving_approval "${LOCAL_APP}"
   DOWNLOADED=2
 fi
 
@@ -56,7 +74,10 @@ download_release_zip() {
   if command -v gh >/dev/null 2>&1; then
     echo "Checking for latest release via GitHub CLI…"
     if gh release download --repo "${REPO}" --pattern "MailExporter-*.zip*" --dir "${TMP_DIR}" 2>/dev/null; then
-      FOUND_ZIP="$(find "${TMP_DIR}" -name "MailExporter-*.zip" ! -name "*.sha256" | head -1)"
+      FOUND_ZIP="$(find "${TMP_DIR}" -name "MailExporter-*-sparkle.zip" | head -1)"
+      if [[ -z "${FOUND_ZIP}" ]]; then
+        FOUND_ZIP="$(find "${TMP_DIR}" -name "MailExporter-*.zip" ! -name "*.sha256" | head -1)"
+      fi
       FOUND_SUM="$(find "${TMP_DIR}" -name "MailExporter-*.sha256" | head -1)"
       if [[ -n "${FOUND_ZIP}" ]]; then
         ZIP_PATH="${FOUND_ZIP}"
@@ -108,11 +129,17 @@ if [[ "${DOWNLOADED}" -eq 1 && -f "${ZIP_PATH}" ]]; then
       exit 1
     fi
   else
-    echo "Warning: no .sha256 file next to the zip; continuing without a checksum." >&2
+    echo "No checksum file next to the zip. Refusing to install." >&2
+    exit 1
   fi
-  echo "Extracting ${APP_NAME} to ${DEST_DIR}…"
-  rm -rf "${DEST_DIR}/${APP_NAME}"
-  unzip -q -o "${ZIP_PATH}" -d "${DEST_DIR}"
+  echo "Extracting…"
+  unzip -q -o "${ZIP_PATH}" -d "${TMP_DIR}/unzipped"
+  FOUND_APP="$(find "${TMP_DIR}/unzipped" -name "${APP_NAME}" -type d | head -1)"
+  if [[ -z "${FOUND_APP}" ]]; then
+    echo "The zip did not contain ${APP_NAME}." >&2
+    exit 1
+  fi
+  install_preserving_approval "${FOUND_APP}"
 fi
 
 echo "Verifying code signature…"

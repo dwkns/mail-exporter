@@ -11,7 +11,7 @@ Whenever you change anything that ships in the Mac app — Swift under `apps/Mai
 ./apps/MailExporter/build.sh
 ```
 
-The build script will automatically compile, sign, and copy the app to `/Applications/MailExporter.app`.
+The build script updates `/Applications/MailExporter.app` in place and keeps the stamp already on that app. Do not set `SIGN_IDENTITY`. A different stamp makes macOS ask for disk access again, and the script will refuse.
 
 Do this automatically; do not ask the user to rebuild. Prefer rebuilding **after** the related commit. An uncommitted rebuild while `HEAD` is still the previous tag stamps that old version into `/Applications`. Tell the user briefly that the app was rebuilt and copied to `/Applications`, including `CFBundleShortVersionString`.
 
