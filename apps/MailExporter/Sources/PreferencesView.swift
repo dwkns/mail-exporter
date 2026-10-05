@@ -158,105 +158,29 @@ struct StoragePreferencesView: View {
 }
 
 struct UpdatesPreferencesView: View {
-    @ObservedObject private var prefs = AppPreferences.shared
-    @ObservedObject private var updater = AppUpdater.shared
+    private var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
+    }
+
+    private var build: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
 
     var body: some View {
         SettingsPane {
             VStack(alignment: .leading, spacing: 2) {
                 Text("MailExporter")
                     .font(.subheadline.weight(.semibold))
-                Text("Version \(updater.currentVersion) (build \(updater.currentBuild))")
+                Text("Version \(version) (build \(build))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Toggle("Automatically check for updates on launch", isOn: $prefs.autoCheckUpdates)
-                .onChange(of: prefs.autoCheckUpdates) { enabled in
-                    updater.setAutomaticChecks(enabled)
-                }
-
-            Text("Sparkle checks when MailExporter opens and again once a day. Until a signed appcast is on GitHub Releases, Check for Updates uses the GitHub zip.")
+            Text("You get a new version when the app is built again on this Mac.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 12) {
-                Button {
-                    updater.showUpdateWindow()
-                } label: {
-                    if updater.isChecking {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Checking…")
-                    } else {
-                        Text("Check for Updates Now")
-                    }
-                }
-                .disabled(updater.isChecking || updater.isUpdating)
-
-                if let last = updater.lastCheckDate {
-                    Text("Last checked \(Self.formatDate(last))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if updater.updateAvailable {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Version \(updater.latestVersion) is available")
-                        .font(.subheadline.weight(.semibold))
-                    if !updater.releaseNotes.isEmpty {
-                        Text(updater.releaseNotes)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    Button {
-                        Task { await updater.downloadAndInstall() }
-                    } label: {
-                        if updater.isUpdating {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Updating…")
-                        } else {
-                            Text("Download and Install Update")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(updater.isUpdating)
-                }
-            } else if !updater.statusMessage.isEmpty {
-                HStack(spacing: 6) {
-                    if updater.errorMessage != nil {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                    }
-                    Text(updater.statusMessage)
-                        .foregroundStyle(updater.errorMessage != nil ? Color.red : Color.secondary)
-                }
-                .font(.caption)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("GitHub token (optional)")
-                    .font(.subheadline.weight(.semibold))
-                SecureField("Personal access token", text: $prefs.gitHubToken)
-                    .textFieldStyle(.roundedBorder)
-                Text("Stored in Keychain. Only needed if Sparkle’s appcast is missing and GitHub rate-limits the fallback.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
-    }
-
-    private static func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .short
-        return formatter.string(from: date)
     }
 }
 
@@ -302,17 +226,6 @@ struct AdvancedPreferencesView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle("Export All every hour", isOn: $prefs.scheduledExportEnabled)
-                Text("Uses a user launchd job that opens mailexporter://export-all. Folders go stale unless something runs ⌘E.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 20)
             }
 
             Divider()

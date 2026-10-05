@@ -201,6 +201,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if cmd == "ping":
             print(json.dumps({"ok": True, "pong": True}), flush=True)
             continue
+        if cmd in ("create-job", "edit-job"):
+            from engine.jobs import apply_job_command
+
+            config = req.get("config") or args.config
+            print(
+                json.dumps(apply_job_command(req, config_path(config))),
+                flush=True,
+            )
+            continue
         if cmd != "export":
             print(json.dumps({"ok": False, "error": f"unknown cmd: {cmd}"}), flush=True)
             continue

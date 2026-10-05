@@ -35,6 +35,7 @@ struct RunView: View {
     @State private var runningJobID: String?
     @State private var tick: Timer?
     @State private var clearConfirmJob: ExportJob?
+    @State private var confirmLinkExportAll = false
     @State private var editor: JobEditorPresentation?
 
     var body: some View {
@@ -58,6 +59,10 @@ struct RunView: View {
         .onReceive(NotificationCenter.default.publisher(for: .mailExporterExportAll)) { _ in
             guard !busy, hasExportableJob else { return }
             run(jobID: nil)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mailExporterConfirmExportAll)) { _ in
+            guard !busy, hasExportableJob else { return }
+            confirmLinkExportAll = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .mailExporterExportJob)) { note in
             guard !busy else { return }
@@ -114,6 +119,17 @@ struct RunView: View {
             Text(
                 "Delete all exported .eml files in:\n\(job.outputDir)\n\nThe next export will rewrite every matching message."
             )
+        }
+        .confirmationDialog(
+            "Copy every mailbox?",
+            isPresented: $confirmLinkExportAll
+        ) {
+            Button("Copy every mailbox") {
+                run(jobID: nil)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This copies mail for every job. It does not run by itself.")
         }
     }
 

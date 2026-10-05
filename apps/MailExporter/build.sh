@@ -74,19 +74,6 @@ ensure_bundled_rg() {
 }
 ensure_bundled_rg
 
-SPARKLE_DIR="$("${ROOT}/ensure-sparkle.sh")"
-SPARKLE_PUB_FILE="${ROOT}/sparkle-public-ed-key.txt"
-if [[ ! -f "${SPARKLE_PUB_FILE}" ]]; then
-  echo "error: missing ${SPARKLE_PUB_FILE}" >&2
-  exit 1
-fi
-SPARKLE_PUBLIC_ED_KEY="$(tr -d '[:space:]' < "${SPARKLE_PUB_FILE}")"
-if [[ -z "${SPARKLE_PUBLIC_ED_KEY}" ]]; then
-  echo "error: empty Sparkle public EdDSA key" >&2
-  exit 1
-fi
-echo "Sparkle framework: ${SPARKLE_DIR}/Sparkle.framework"
-
 if [[ ! -x "${VENV}/bin/pyinstaller" ]]; then
   echo "Creating venv + PyInstaller…"
   PYTHON_BIN="$(command -v python3 || true)"
@@ -223,16 +210,6 @@ cat > "${APP}/Contents/Info.plist" <<PLIST
       </array>
     </dict>
   </array>
-  <key>SUFeedURL</key>
-  <string>https://github.com/dwkns/mail-exporter/releases/latest/download/appcast.xml</string>
-  <key>SUPublicEDKey</key>
-  <string>${SPARKLE_PUBLIC_ED_KEY}</string>
-  <key>SUEnableAutomaticChecks</key>
-  <true/>
-  <key>SUScheduledCheckInterval</key>
-  <integer>86400</integer>
-  <key>SUAutomaticallyUpdate</key>
-  <false/>
 </dict>
 </plist>
 PLIST
@@ -423,8 +400,6 @@ swiftc \
   -sdk "$(xcrun --show-sdk-path)" \
   -target arm64-apple-macos13 \
   -parse-as-library \
-  -F "${SPARKLE_DIR}" \
-  -framework Sparkle \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks
 
 echo "Bundling Python engine (PyInstaller onedir — fast startup)…"
@@ -479,9 +454,6 @@ cp "${VENDOR_RG}" "${HELPER_DIR}/bin/rg"
 chmod +x "${HELPER_DIR}/bin/rg"
 
 mkdir -p "${APP}/Contents/Frameworks"
-# ditto keeps Sparkle.framework symlinks (Versions/Current → B).
-ditto "${SPARKLE_DIR}/Sparkle.framework" "${APP}/Contents/Frameworks/Sparkle.framework"
-
 echo "Signing…"
 HELPER_ENGINE="${HELPER_DIR}/MailExporterEngine"
 ENT="${ROOT}/build/MailExporter.entitlements"
@@ -531,16 +503,6 @@ codesign --force --sign "${SIGN_IDENTITY}" --entitlements "${HELPER_ENT}" \
   "${HELPER_ENGINE}/MailExporterEngine"
 codesign --force --sign "${SIGN_IDENTITY}" \
   "${HELPER_DIR}/bin/rg"
-
-SPARKLE_FW="${APP}/Contents/Frameworks/Sparkle.framework"
-if [[ -d "${SPARKLE_FW}" ]]; then
-  codesign --force --sign "${SIGN_IDENTITY}" "${SPARKLE_FW}/Versions/B/XPCServices/Downloader.xpc" || true
-  codesign --force --sign "${SIGN_IDENTITY}" "${SPARKLE_FW}/Versions/B/XPCServices/Installer.xpc" || true
-  codesign --force --sign "${SIGN_IDENTITY}" "${SPARKLE_FW}/Versions/B/Updater.app" || true
-  codesign --force --sign "${SIGN_IDENTITY}" "${SPARKLE_FW}/Versions/B/Autoupdate" || true
-  codesign --force --sign "${SIGN_IDENTITY}" "${SPARKLE_FW}/Versions/B/Sparkle"
-  codesign --force --sign "${SIGN_IDENTITY}" "${SPARKLE_FW}"
-fi
 
 APP_SIGN_FLAGS=(--force --sign "${SIGN_IDENTITY}" --entitlements "${APP_ENT}")
 if [[ -n "${PROVISION_EMBED}" ]]; then

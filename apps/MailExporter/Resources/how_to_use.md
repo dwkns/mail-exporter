@@ -90,13 +90,7 @@ Best regards
 | `Attach` | One or more files **inside this project**, comma+space separated (`Documents/a.pdf, Documents/b.pdf`). Prefer `Documents/…` from the project root, or a file next to the `.md` in `Drafts/`. `Email/Attachments/<id>/…` is fine. Absolute paths are allowed only under `{{PROJECT_DIR}}`. Paths outside the project, `~/…` to elsewhere, and `..` that escapes the project are refused. After the draft opens, MailExporter counts attachments against this list and will not return a silent OK if they differ. |
 | `Format: plain` | Skip Markdown rendering. |
 
-When the owner says “send it”, open an Apple Mail draft (never send):
-
-```bash
-/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft "{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md"
-```
-
-Same command as `draft`. Dev: `python3 -m engine append-draft path.md`. Or drop the `.md` on MailExporter, or MCP `compose_draft`.
+When the owner says “send it”, ask MailExporter to open an Apple Mail draft (never send). Use MCP `compose_draft` with the Markdown path. Do not start the mail program yourself. You can also drop the `.md` on MailExporter.
 
 Dropping a PDF on the Export pane does **not** attach it — put it on `Attach:`. Import new papers into `Documents/` first (do not copy them into `Email/`).
 
@@ -134,7 +128,7 @@ Or Settings → Advanced → Install mail-exporter MCP.
 | `compose_draft` | Open Mail draft/reply from Markdown in `Drafts/`. |
 | `check_matches` / `export_job` | Refresh from Apple Mail. Pass `job_name` only; omit `job_id` / `force_full` unless needed. |
 
-Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md` → `append-draft` when they say send it → `export_job` again after they send.
+Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md` → `compose_draft` when they say send it → `export_job` again after they send.
 
 ## Ground rules
 

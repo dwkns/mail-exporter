@@ -12,7 +12,7 @@ struct PermissionsBanner: View {
                 icon: "lock.shield.fill",
                 tint: .orange,
                 title: "Full Disk Access Required",
-                detail: "Grant Full Disk Access to MailExporter (this app). If you run exports from Cursor or Claude Desktop instead, grant those apps. Terminal needs it for `python3 -m engine`. If the toggle is already on but this banner stays, remove MailExporter (−), add it again (+), then quit and reopen.",
+                detail: "MailExporter cannot open Apple Mail’s private folder. Turn on Full Disk Access for MailExporter. Then quit MailExporter and open it again.",
                 settings: .fullDiskAccess,
                 onDismiss: { dismissedFullDisk = true }
             )

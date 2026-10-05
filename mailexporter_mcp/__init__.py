@@ -22,12 +22,9 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from engine.compose_draft import compose_draft as _compose_draft  # noqa: E402
-from engine.compose_draft import compose_markdown_text  # noqa: E402
-from engine.criteria import parse_match  # noqa: E402
 from engine.howto import DRAFTS_SUBDIR, HOW_TO_FILENAME, SENT_SUBDIR, sync_how_to_all, write_how_to  # noqa: E402
-from engine.jobs import Job, JobsFile, default_jobs_path, load_jobs, save_jobs  # noqa: E402
-from engine.project import LEGACY_HOWTO, resolved_project_root  # noqa: E402
+from engine.jobs import Job, default_jobs_path, load_jobs  # noqa: E402
+from engine.project import LEGACY_HOWTO  # noqa: E402
 
 mcp = FastMCP("mail-exporter")
 
@@ -474,19 +471,16 @@ def compose_draft(path: str = "", markdown: str = "") -> str:
     ``requested`` and is not OK if they differ.
     Uses AppleScript (native reply quote; GUI Attach Files for reply+attachments).
     """
-    try:
-        if path:
-            md_path = Path(path).expanduser()
-            if not md_path.is_file():
-                return json.dumps({"error": f"file not found: {md_path}"})
-            result = _compose_draft(md_path)
-        elif markdown.strip():
-            result = compose_markdown_text(markdown)
-        else:
-            return json.dumps({"error": "provide path or markdown"})
-        return json.dumps(result, indent=2)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)}, indent=2)
+    if path:
+        md_path = Path(path).expanduser()
+        if not md_path.is_file():
+            return json.dumps({"error": f"file not found: {md_path}"})
+        req: dict[str, Any] = {"cmd": "compose", "path": str(md_path)}
+    elif markdown.strip():
+        req = {"cmd": "compose", "markdown": markdown}
+    else:
+        return json.dumps({"error": "provide path or markdown"})
+    return json.dumps(_ask_app(req), indent=2)
 
 
 @mcp.tool()
@@ -639,7 +633,7 @@ def create_job(
         return json.dumps({"ok": False, "error": "name required"})
     if not output_dir:
         return json.dumps({"ok": False, "error": "output_dir required"})
-    raw_match: dict[str, Any]
+    raw_match: dict[str, Any] | None
     if match_json.strip():
         try:
             parsed = json.loads(match_json)
@@ -649,39 +643,19 @@ def create_job(
             return json.dumps({"ok": False, "error": "match_json must be an object"})
         raw_match = parsed
     else:
-        raw_match = {
-            "conjunction": "any",
-            "conditions": [
-                {"field": "entire", "op": "contains", "values": [name]}
-            ],
-        }
-    try:
-        match = parse_match(raw_match)
-    except Exception as exc:
-        return json.dumps({"ok": False, "error": str(exc)})
-    path = _config_path()
-    jobs = load_jobs(path)
-    if any(j.name.lower() == name.lower() for j in jobs.jobs):
-        return json.dumps({"ok": False, "error": f"job already exists: {name}"})
-    import uuid
-
-    job = Job(
-        id=str(uuid.uuid4()),
-        name=name,
-        output_dir=output_dir,
-        match=match,
-        include_sent=include_sent,
-        include_bin=include_bin,
-        include_thread=include_thread,
-        project_dir=str(resolved_project_root(output_dir)),
-    )
-    jobs.jobs.append(job)
-    save_jobs(jobs, path)
-    try:
-        write_how_to(Path(output_dir), mailbox_name=name)
-    except Exception:
-        pass
-    return json.dumps({"ok": True, "job": _job_row(job), "config": str(path)}, indent=2)
+        raw_match = None
+    req: dict[str, Any] = {
+        "cmd": "create-job",
+        "config": str(_config_path()),
+        "name": name,
+        "outputDir": output_dir,
+        "includeSent": include_sent,
+        "includeBin": include_bin,
+        "includeThread": include_thread,
+    }
+    if raw_match is not None:
+        req["match"] = raw_match
+    return json.dumps(_ask_app(req), indent=2)
 
 
 @mcp.tool()
@@ -696,48 +670,27 @@ def edit_job(
     include_thread: str = "",
 ) -> str:
     """Update an existing job. Empty strings leave that field unchanged."""
-    try:
-        job = _find_job(job_id=job_id or None, job_name=job_name or None)
-    except ValueError as exc:
-        return json.dumps({"ok": False, "error": str(exc)})
-    path = _config_path()
-    jobs = load_jobs(path)
-    target = None
-    for j in jobs.jobs:
-        if j.id == job.id:
-            target = j
-            break
-    if target is None:
-        return json.dumps({"ok": False, "error": "job not found after reload"})
-    if name.strip():
-        target.name = name.strip()
-    if output_dir.strip():
-        target.output_dir = output_dir.strip()
-        target.project_dir = str(resolved_project_root(target.output_dir))
     if match_json.strip():
         try:
             parsed = json.loads(match_json)
-            if not isinstance(parsed, dict):
-                raise ValueError("match_json must be an object")
-            target.match = parse_match(parsed)
-        except (json.JSONDecodeError, ValueError) as exc:
+        except json.JSONDecodeError as exc:
             return json.dumps({"ok": False, "error": str(exc)})
-
-    def _opt_bool(raw: str, current: bool) -> bool:
-        s = raw.strip().lower()
-        if not s:
-            return current
-        if s in ("1", "true", "yes"):
-            return True
-        if s in ("0", "false", "no"):
-            return False
-        return current
-
-    target.include_sent = _opt_bool(include_sent, target.include_sent)
-    target.include_bin = _opt_bool(include_bin, target.include_bin)
-    target.include_thread = _opt_bool(include_thread, target.include_thread)
-    save_jobs(jobs, path)
-    return json.dumps({"ok": True, "job": _job_row(target), "config": str(path)}, indent=2)
+        if not isinstance(parsed, dict):
+            return json.dumps({"ok": False, "error": "match_json must be an object"})
+    req: dict[str, Any] = {
+        "cmd": "edit-job",
+        "config": str(_config_path()),
+        "jobName": job_name,
+        "jobId": job_id,
+        "name": name,
+        "outputDir": output_dir,
+        "includeSent": include_sent,
+        "includeBin": include_bin,
+        "includeThread": include_thread,
+    }
+    if match_json.strip():
+        req["match"] = json.loads(match_json)
+    return json.dumps(_ask_app(req), indent=2)
 
 
 def main() -> None:

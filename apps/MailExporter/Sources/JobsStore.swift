@@ -17,6 +17,9 @@ final class JobsStore: ObservableObject {
     private var ignoreCloudReloadUntil = Date.distantPast
     private var ubiquityObserver: NSObjectProtocol?
 
+    /// The running window’s job list. The command socket uses this after a job change.
+    static weak var current: JobsStore?
+
     /// Private iCloud ubiquity container (does not appear as an iCloud Drive folder).
     static let iCloudContainerIdentifier = "iCloud.com.dwkns.MailExporter"
 
@@ -125,6 +128,7 @@ final class JobsStore: ObservableObject {
     }
 
     init() {
+        Self.current = self
         Self.autoMigrateToICloudIfNeeded()
         Self.ensureICloudJobsDownloaded()
         Self.writeJobsLocationPointer(Self.defaultConfigURL())
@@ -540,6 +544,10 @@ final class JobsStore: ObservableObject {
 
     func updateOutputDir(for jobID: String, newPath: String) {
         guard let idx = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        if Self.isForbiddenOutputDir(newPath) {
+            status = "That folder is inside Apple Mail. Choose a different folder."
+            return
+        }
         jobs[idx].outputDir = newPath
         jobs[idx].syncProjectDirFromOutput()
         refreshBookmark(for: idx)
@@ -748,6 +756,10 @@ final class JobsStore: ObservableObject {
 
     /// Insert or replace a job and write `jobs.json`. Refreshes `how_to_use.md` if the folder exists.
     func upsertJob(_ job: ExportJob) {
+        if Self.isForbiddenOutputDir(job.outputDir) {
+            status = "That folder is inside Apple Mail. Choose a different folder."
+            return
+        }
         var next = job
         next.syncProjectDirFromOutput()
         if let idx = jobs.firstIndex(where: { $0.id == next.id }) {

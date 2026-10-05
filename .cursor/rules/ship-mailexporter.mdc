@@ -9,7 +9,7 @@ After finishing a **shippable** feature or bug fix (not docs-only / rule-only / 
 
 ## Why version order matters
 
-`build.sh` sets `CFBundleShortVersionString` from the latest git tag plus commits since that tag (`APP_VERSION` overrides). Building **before** the ship commit, while `HEAD` is still the previous tag, stamps the **old** version (commits-since = 0). A silent failed copy into `/Applications` leaves the previous binary in place. Either way the user launches last-release (e.g. 1.1.7) and the in-app updater immediately offers the tag you just published (e.g. 1.1.8).
+`build.sh` sets `CFBundleShortVersionString` from the latest git tag plus commits since that tag (`APP_VERSION` overrides). Building **before** the ship commit, while `HEAD` is still the previous tag, stamps the **old** version (commits-since = 0). A silent failed copy into `/Applications` leaves the previous binary in place. The user then launches the previous app.
 
 Local `/Applications/MailExporter.app` must show the version being tagged.
 
@@ -53,7 +53,7 @@ NEXT="v${MAJOR}.${MINOR}.${PATCH}"
 
 ## Notes
 
-- A plain `main` push builds CI artifacts but does **not** create a GitHub Release; in-app updates need a real Release with the zip.
-- The app in `/Applications` is the one the user runs. `build.sh` keeps its stamp. Do not install the GitHub zip or a Developer ID build over it.
-- A download for another Mac is separate. `scripts/sparkle-publish-on-mini.sh "${NEXT}"` can run on any Mac that already has the Developer ID certificate and the Sparkle key. The Mini is headless and is not required. That script must not replace `/Applications/MailExporter.app`.
+- A plain `main` push builds CI artifacts but does **not** create a GitHub Release.
+- The app in `/Applications` is the one the user runs. `build.sh` updates that app in place and keeps its permission. Do not install a downloaded zip over it.
+- Do not add a feature that downloads a new copy of the app. This app stays on the owner’s Macs.
 - Tell the user the new tag, that CI will publish the release, and the `CFBundleShortVersionString` now in `/Applications`.

@@ -46,30 +46,42 @@ enum PrivacySettingsPane: Equatable {
 }
 
 enum MailAccessProbe {
-    /// True when Mail library looks readable enough to export.
+    /// True when this app can open Apple Mail’s private folder.
+    /// A missing Mail folder is not a permission failure.
     static func canAccessMailLibrary() -> Bool {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let mail = home.appendingPathComponent("Library/Mail")
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: mail.path, isDirectory: &isDir), isDir.boolValue else {
-            return false
+            return true
         }
+        let contents: [URL]
         do {
-            let contents = try fm.contentsOfDirectory(
+            contents = try fm.contentsOfDirectory(
                 at: mail,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
             )
-            if contents.contains(where: { $0.lastPathComponent.hasPrefix("V") }) {
-                return true
-            }
-            // Some installs only expose PersistenceInfo until a version folder is created;
-            // being able to list the directory at all means Full Disk Access is working.
-            return true
         } catch {
             return false
         }
+        let dataDirs = contents
+            .filter { $0.lastPathComponent.hasPrefix("V") }
+            .map { $0.appendingPathComponent("MailData") }
+        if dataDirs.isEmpty {
+            return true
+        }
+        for data in dataDirs {
+            let envelope = data.appendingPathComponent("Envelope Index")
+            if fm.fileExists(atPath: envelope.path) {
+                return fm.isReadableFile(atPath: envelope.path)
+            }
+            if (try? fm.contentsOfDirectory(at: data, includingPropertiesForKeys: nil)) != nil {
+                return true
+            }
+        }
+        return false
     }
 
     /// True when Accessibility permission has been granted (for rich text paste).
@@ -79,10 +91,11 @@ enum MailAccessProbe {
 
     static func looksLikeFullDiskDenial(_ message: String) -> Bool {
         let lower = message.lowercased()
+        let mentionsMail = lower.contains("library/mail") || lower.contains("full disk access") || lower.contains("blocked access to")
+        let denied = lower.contains("operation not permitted") || lower.contains("permission denied")
         return lower.contains("full disk access")
-            || lower.contains("operation not permitted")
-            || lower.contains("permission denied")
             || lower.contains("blocked access to")
+            || (mentionsMail && denied)
     }
 
     static func looksLikeAccessibilityDenial(_ message: String) -> Bool {

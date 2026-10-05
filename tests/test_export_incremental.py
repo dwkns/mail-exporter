@@ -123,6 +123,55 @@ def test_incremental_export_writes_then_skips(tmp_path: Path, monkeypatch) -> No
     assert len(list(out.glob("*.eml"))) == 1
 
 
+def test_refresh_when_message_changes(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<a@x>", subject="Your invoice", body="hello invoice"),
+    )
+    paths = [p1]
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: paths)
+    job = _job(tmp_path)
+    run_job(job)
+    p1.write_bytes(_emlx(_rfc822(mid="<a@x>", subject="Your invoice", body="hello invoice updated")))
+    again = run_job(job)
+    assert again["newlyWritten"] == 1
+    text = list(Path(job.output_dir).glob("*.eml"))[0].read_text(encoding="utf-8")
+    assert "updated" in text
+
+
+def test_prune_when_message_stops_matching(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(mail, "1.emlx", _rfc822(mid="<a@x>", subject="Your invoice"))
+    p2 = _write_emlx(mail, "2.emlx", _rfc822(mid="<b@x>", subject="Another invoice"))
+    paths = [p1, p2]
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: list(paths))
+    job = _job(tmp_path)
+    first = run_job(job)
+    assert first["newlyWritten"] == 2
+    paths.remove(p2)
+    p2.write_bytes(_emlx(_rfc822(mid="<b@x>", subject="newsletter", body="no match")))
+    again = run_job(job)
+    names = [p.name for p in Path(job.output_dir).glob("*.eml")]
+    assert len(names) == 1
+    assert again["orphansRemoved"] >= 1
+
+
+def test_one_copy_per_message(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(mail, "1.emlx", _rfc822(mid="<a@x>", subject="Your invoice"))
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    run_job(job)
+    out = Path(job.output_dir)
+    extra = out / "duplicate.eml"
+    extra.write_bytes(next(out.glob("*.eml")).read_bytes())
+    assert len(list(out.glob("*.eml"))) == 2
+    run_job(job)
+    assert len(list(out.glob("*.eml"))) == 1
+
+
 def test_force_full_rewrites(tmp_path: Path, monkeypatch) -> None:
     mail = tmp_path / "mail"
     p1 = _write_emlx(

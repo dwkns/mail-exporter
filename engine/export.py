@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -54,42 +55,51 @@ def save_state(path: Path, state: dict) -> None:
         "ids": list(state.get("ids") or []),
         "files": dict(state.get("files") or {}),
     }
-    if "watermarkMtime" in state:
-        out["watermarkMtime"] = state["watermarkMtime"]
+    hashes = state.get("sourceHashes")
+    if isinstance(hashes, dict):
+        out["sourceHashes"] = {str(k): str(v) for k, v in hashes.items()}
     if "matchHash" in state:
         out["matchHash"] = state["matchHash"]
     path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
 
 
 def prune_orphans(output_dir: Path, keep_ids: set[str], files: dict[str, str] | None = None) -> int:
+    """Remove copies that no longer match, and extra copies of the same message."""
     removed = 0
     known = files or {}
     remaining: dict[str, str] = {}
     seen_files: set[Path] = set()
-    for mid, name in known.items():
-        path = output_dir / name
-        if mid not in keep_ids:
-            try:
+    kept_ids: set[str] = set()
+
+    def drop(path: Path) -> None:
+        nonlocal removed
+        try:
+            if path.is_file():
                 path.unlink()
                 removed += 1
-            except OSError:
-                pass
+        except OSError:
+            pass
+
+    for mid, name in list(known.items()):
+        path = output_dir / name
+        if mid not in keep_ids or mid in kept_ids:
+            drop(path)
             continue
         if path.is_file():
             remaining[mid] = name
             seen_files.add(path.resolve())
+            kept_ids.add(mid)
     for path in list(output_dir.glob("*.eml")):
-        if path.resolve() in seen_files:
+        resolved = path.resolve()
+        if resolved in seen_files:
             continue
         mid = message_id_from_eml_file(path)
-        if mid is None or mid not in keep_ids:
-            try:
-                path.unlink()
-                removed += 1
-            except OSError:
-                pass
-        else:
-            remaining[mid] = path.name
+        if mid is None or mid not in keep_ids or mid in kept_ids:
+            drop(path)
+            continue
+        remaining[mid] = path.name
+        seen_files.add(resolved)
+        kept_ids.add(mid)
     if files is not None:
         files.clear()
         files.update(remaining)
@@ -365,21 +375,13 @@ def run_job(
     state_file = output_dir / ".exported-ids.json"
     state = load_state(state_file) if not dry_run else {"ids": [], "files": {}}
     current_hash = match_hash(job)
-    watermark = None
-    if (
-        not dry_run
-        and not force_full
-        and state.get("matchHash") == current_hash
-        and isinstance(state.get("watermarkMtime"), (int, float))
-    ):
-        watermark = float(state["watermarkMtime"])
-
+    # Always read the current matches. A time watermark left old copies in place
+    # when a message changed or stopped matching.
     matches = collect_matches(
         job,
         dry_run=dry_run,
         timings=timings,
         candidates=candidates,
-        watermark_mtime=watermark,
     )
     match_count = len(matches)
     keep_ids = {message_stable_id(msg, path) for path, msg, _ in matches}
@@ -407,6 +409,11 @@ def run_job(
     write_how_to(output_dir, mailbox_name=job.name)
 
     files = dict(state.get("files") or {})
+    source_hashes = {
+        str(k): str(v)
+        for k, v in (state.get("sourceHashes") or {}).items()
+        if isinstance(state.get("sourceHashes"), dict)
+    }
     if force_full:
         for path in output_dir.glob("*.eml"):
             try:
@@ -415,28 +422,28 @@ def run_job(
                 pass
         state = {"ids": [], "files": {}}
         files = {}
+        source_hashes = {}
         save_state(state_file, state)
 
-    if watermark is None:
-        orphans = prune_orphans(output_dir, keep_ids, files)
-    else:
-        orphans = 0
-        keep_ids = keep_ids | set(files)
-    exported = set(files) | set(state.get("ids") or [])
+    orphans = prune_orphans(output_dir, keep_ids, files)
+    source_hashes = {k: v for k, v in source_hashes.items() if k in files}
     newly_written = 0
     attachments_filled = 0
     sidecar_written = 0
     errors = 0
     t_attach = 0.0
-    newest_mtime = watermark or 0.0
 
     for path, raw_bytes, _ in matches:
-        try:
-            newest_mtime = max(newest_mtime, path.stat().st_mtime)
-        except OSError:
-            pass
         sid = message_stable_id(raw_bytes, path)
-        if sid in exported and not force_full:
+        digest = hashlib.sha256(raw_bytes).hexdigest()[:16]
+        old_name = files.get(sid)
+        old_path = output_dir / old_name if old_name else None
+        if (
+            not force_full
+            and old_path is not None
+            and old_path.is_file()
+            and source_hashes.get(sid) == digest
+        ):
             continue
         t_a = time.perf_counter()
         try:
@@ -466,7 +473,7 @@ def run_job(
             errors += 1
             continue
         files[sid] = filename
-        exported.add(sid)
+        source_hashes[sid] = digest
         newly_written += 1
         attachments_filled += filled
         sidecar_written += write_attachments_sidecar(output_dir, sid, path)
@@ -476,14 +483,14 @@ def run_job(
     state = {
         "ids": sorted(files),
         "files": files,
-        "watermarkMtime": newest_mtime,
+        "sourceHashes": {k: source_hashes[k] for k in files if k in source_hashes},
         "matchHash": current_hash,
     }
     save_state(state_file, state)
     if timings is not None:
         timings["attach_write_s"] = round(t_attach, 3)
         timings["newly_written"] = newly_written
-    count_ok = folder_count == match_count or watermark is not None
+    count_ok = folder_count == match_count
     if newly_written == 0:
         line = "Up to date"
     else:
