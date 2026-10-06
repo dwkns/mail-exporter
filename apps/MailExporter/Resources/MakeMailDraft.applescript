@@ -549,61 +549,57 @@ end mmdReplyWithAttachments
 
 
 -- Modern Mail ignores AppleScript `make new attachment` (returns OK, count stays 0).
--- GUI Attach Files works only on the front compose window. Several drafts can
--- share "Re: …", so we retitle uniquely, attach every staged file in ONE
--- dialog (Go to Folder + Cmd-A), then restore the subject. Count via Message
--- Size: `mail attachments` is always 0 for GUI-attached files.
+-- Open each file by its own path. Do not press Command-A in the file list:
+-- that selects every file in the folder, so one Open adds the whole folder,
+-- and the per-file loop adds that set again.
+-- Count the attachment chips on the draft. Do not treat a larger Message
+-- Size as proof that the count matches the Attach line. A second copy of the
+-- same files still makes the message bigger.
 on mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
 	if (count of foundFiles) is 0 then return
 	set realSubject to focusSubject
 	try
 		tell application "Mail" to set realSubject to (subject of newMessage) as text
 	end try
-	set tempSubject to "ME-att-" & (random number from 100000 to 999999)
-	try
-		tell application "Mail" to set subject of newMessage to tempSubject
-	end try
-	delay 0.4
-	mmdRaiseCompose(tempSubject)
-	set sizeBefore to 0
-	repeat 12 times
-		set sizeBefore to mmdMessageSizeBytes(tempSubject)
-		if sizeBefore > 0 then exit repeat
+	set tempSubject to realSubject
+	-- Wait until the compose window is visible before Attach Files.
+	set renamed to false
+	repeat 25 times
+		try
+			tell application "System Events"
+				tell process "Mail"
+					if exists window tempSubject then set renamed to true
+				end tell
+			end tell
+		end try
+		if renamed then exit repeat
 		delay 0.2
 	end repeat
-	set expectedBytes to mmdFilesByteTotal(foundFiles)
-	set landed to 0
+	delay 0.8
+	if not renamed then
+		mmdLog("compose window was not found")
+		set my mmdAttachedCount to 0
+		set my mmdAttachMismatch to true
+		try
+			tell application "Mail" to set subject of newMessage to realSubject
+		end try
+		return
+	end if
+	mmdRaiseCompose(tempSubject)
 	repeat with aFile in foundFiles
 		set posixPath to POSIX path of aFile
-		set beforeOne to mmdMessageSizeBytes(tempSubject)
 		set okOne to mmdGUIAttachOneFile(posixPath, tempSubject)
-		delay 0.45
-		set afterOne to mmdMessageSizeBytes(tempSubject)
-		if okOne then
-			if afterOne > beforeOne or beforeOne = 0 then
-				set landed to landed + 1
-			else
-				-- Small files may not change a rounded "1 MB" label.
-				set landed to landed + 1
-			end if
-		end if
-		mmdLog("attach one " & posixPath & " ok=" & okOne & " size " & beforeOne & "->" & afterOne)
+		mmdLog("attach one " & posixPath & " ok=" & okOne)
+		delay 0.35
 	end repeat
 	delay 0.4
-	set sizeAfter to mmdMessageSizeBytes(tempSubject)
-	set delta to sizeAfter - sizeBefore
-	mmdLog("attach size before=" & sizeBefore & " after=" & sizeAfter & " delta=" & delta & " expected=" & expectedBytes & " landed=" & landed)
-	set attached to landed
-	if sizeBefore > 0 and expectedBytes > 0 and delta < 4000 and landed > 0 then
-		-- GUI thought it succeeded but Message Size did not move.
-		set attached to 0
-	end if
-	if sizeBefore > 0 and expectedBytes > 0 and delta >= (expectedBytes * 0.4) then
-		set attached to count of foundFiles
-	end if
+	set chips to mmdAttachmentDescriptions(tempSubject)
+	set attached to count of chips
+	mmdLog("attach chips=" & attached & " requested=" & (count of foundFiles))
 	set my mmdAttachedCount to attached
-	if attached < (count of foundFiles) then
-		set end of mmdNotes to "Attach Files did not add every file (Message Size +" & delta & " bytes)."
+	if not mmdChipsMatchOnce(chips, foundFiles) then
+		set my mmdAttachMismatch to true
+		set end of mmdNotes to "Each file must be attached once. The draft has " & attached & "."
 	end if
 	try
 		tell application "Mail" to set subject of newMessage to realSubject
@@ -657,43 +653,19 @@ on mmdSetGoToFolder(winTitle, posixPath)
 		end tell
 	end tell
 	delay 0.7
-	set typed to false
+	-- Setting the text field value reports success, but Mail does not go to
+	-- that folder. Type the path. Command-A replaces whatever is already there.
 	tell application "System Events"
 		tell process "Mail"
-			if exists window winTitle then
-				set w to window winTitle
-				set goSheet to missing value
-				try
-					if (count of sheets of sheet 1 of w) > 0 then set goSheet to sheet 1 of sheet 1 of w
-				end try
-				if goSheet is missing value then
-					try
-						if (count of sheets of w) > 1 then set goSheet to sheet 2 of w
-					end try
-				end if
-				if goSheet is not missing value then
-					try
-						set value of text field 1 of goSheet to posixPath
-						set typed to true
-					end try
-					if not typed then
-						try
-							set value of combo box 1 of goSheet to posixPath
-							set typed to true
-						end try
-					end if
-				end if
-			end if
-			if not typed then
-				keystroke "a" using {command down}
-				delay 0.05
-				keystroke posixPath
-			end if
+			set frontmost to true
+			keystroke "a" using {command down}
+			delay 0.05
+			keystroke posixPath
 			delay 0.2
 			keystroke return
 		end tell
 	end tell
-	delay 0.8
+	delay 0.9
 end mmdSetGoToFolder
 
 
@@ -715,31 +687,20 @@ on mmdGUIAttachOneFile(posixPath, winTitle)
 	end if
 	try
 		mmdSetGoToFolder(winTitle, posixPath)
+		-- The confirm button has no name. Its title is "Choose File".
+		-- Command-O chooses the selected file. Send it only while the dialog
+		-- is open. A later Command-O hits the message and can drop the files.
 		tell application "System Events"
 			tell process "Mail"
 				set frontmost to true
-				keystroke "a" using {command down}
-				delay 0.25
-				set clicked to false
 				if exists window winTitle then
-					try
-						click button "Open" of sheet 1 of window winTitle
-						set clicked to true
-					end try
-					if not clicked then
+					if (count of sheets of window winTitle) > 0 then
 						try
-							click button "Choose File" of sheet 1 of window winTitle
-							set clicked to true
+							set focused of sheet 1 of window winTitle to true
 						end try
-					end if
-					if not clicked then
-						try
-							click button "Choose" of sheet 1 of window winTitle
-							set clicked to true
-						end try
+						keystroke "o" using {command down}
 					end if
 				end if
-				if not clicked then keystroke return
 			end tell
 		end tell
 	on error errMsg
@@ -749,21 +710,27 @@ on mmdGUIAttachOneFile(posixPath, winTitle)
 		end try
 		return false
 	end try
-	delay 0.8
-	try
-		tell application "System Events"
-			tell process "Mail"
-				if exists window winTitle then
-					if (count of sheets of window winTitle) > 0 then
-						key code 53
-						delay 0.2
-						mmdLog("Attach Files sheet still open after confirm")
-						return false
+	set sheetGone to false
+	repeat 15 times
+		delay 0.2
+		try
+			tell application "System Events"
+				tell process "Mail"
+					if exists window winTitle then
+						if (count of sheets of window winTitle) is 0 then set sheetGone to true
 					end if
-				end if
+				end tell
 			end tell
-		end tell
-	end try
+		end try
+		if sheetGone then exit repeat
+	end repeat
+	if not sheetGone then
+		try
+			tell application "System Events" to key code 53
+		end try
+		mmdLog("Attach Files sheet still open after confirm")
+		return false
+	end if
 	return true
 end mmdGUIAttachOneFile
 
@@ -862,6 +829,91 @@ on mmdMessageSizeBytes(winTitle)
 	end try
 	return 0
 end mmdMessageSizeBytes
+
+-- Attachment chips on the compose window. Mail's `mail attachments` stays 0
+-- for files added with Attach Files. The chip description looks like
+-- "P60_2025-26.pdf, 892 KB". Count every chip, including a second copy.
+-- Chips are buttons near the start of the message web area. Do not walk the
+-- quoted letter: that walk takes about a minute and is not the file list.
+on mmdAttachmentDescriptions(winTitle)
+	set found to {}
+	if winTitle is "" then return found
+	try
+		tell application "System Events"
+			tell process "Mail"
+				if not (exists window winTitle) then return found
+				set w to window winTitle
+				repeat with g1 in UI elements of w
+					try
+						if (role of g1 as text) is not "AXGroup" then error "skip"
+						set chain to item 1 of UI elements of g1
+						if (role of chain as text) is not "AXGroup" then error "skip"
+						set chain to item 1 of UI elements of chain
+						if (role of chain as text) is not "AXScrollArea" then error "skip"
+						set web to missing value
+						repeat with sc in UI elements of chain
+							if (role of sc as text) is "AXWebArea" then set web to sc
+						end repeat
+						if web is missing value then error "skip"
+						set kids to UI elements of web
+						set limitN to 60
+						if (count of kids) < limitN then set limitN to count of kids
+						repeat with i from 1 to limitN
+							set found to found & my mmdButtonsFrom(item i of kids)
+						end repeat
+					end try
+				end repeat
+			end tell
+		end tell
+	end try
+	return found
+end mmdAttachmentDescriptions
+
+using terms from application "System Events"
+	on mmdButtonsFrom(el)
+		set out to {}
+		set cr to ""
+		try
+			set cr to role of el as text
+		end try
+		if cr is "AXButton" then
+			try
+				if ((value of attribute "AXRoleDescription" of el) as text) is "attachment" then
+					set end of out to (value of attribute "AXDescription" of el) as text
+				end if
+			end try
+			return out
+		end if
+		if cr is "AXGroup" then
+			try
+				repeat with b in buttons of el
+					set out to out & mmdButtonsFrom(b)
+				end repeat
+			end try
+		end if
+		return out
+	end mmdButtonsFrom
+end using terms from
+
+on mmdChipIsFile(desc, fileName)
+	if fileName is "" then return false
+	if desc is fileName then return true
+	if desc starts with (fileName & ",") then return true
+	return false
+end mmdChipIsFile
+
+on mmdChipsMatchOnce(chips, foundFiles)
+	if (count of chips) is not (count of foundFiles) then return false
+	repeat with aFile in foundFiles
+		set fileName to mmdFileNameOfPOSIX(POSIX path of aFile)
+		set n to 0
+		repeat with c in chips
+			if mmdChipIsFile(c as text, fileName) then set n to n + 1
+		end repeat
+		if n is not 1 then return false
+	end repeat
+	return true
+end mmdChipsMatchOnce
 
 on mmdCheckAttachmentCount(newMessage, focusSubject, attachSpecs, foundFiles)
 	set requestedCount to count of attachSpecs

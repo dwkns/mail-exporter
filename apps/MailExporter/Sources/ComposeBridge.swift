@@ -118,7 +118,7 @@ enum ComposeBridge {
             let parsed = AttachCountCheck.parse(blob)
             let summary: String
             if let parsed, parsed.attached != parsed.requested {
-                summary = "Attachments missing (\(parsed.attached) of \(parsed.requested))"
+                summary = "Attachment count is wrong (\(parsed.attached) of \(parsed.requested))"
             } else if process.terminationStatus != 0 {
                 summary = "Compose failed"
             } else {
