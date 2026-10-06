@@ -116,6 +116,7 @@ final class ComposeRunner: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = false
                 self.lastResult = result
+                DraftNotifier.announce(result, draftCount: md.count)
                 self.statusLines.insert(result.summary, at: 0)
                 if self.statusLines.count > 12 {
                     self.statusLines = Array(self.statusLines.prefix(12))

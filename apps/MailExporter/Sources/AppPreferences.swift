@@ -40,35 +40,10 @@ final class AppPreferences: ObservableObject {
         }
     }
 
-    @Published var autoCheckUpdates: Bool {
-        didSet {
-            UserDefaults.standard.set(autoCheckUpdates, forKey: Keys.autoCheckUpdates)
-        }
-    }
-
-    @Published var gitHubToken: String {
-        didSet {
-            KeychainStore.set(gitHubToken, for: Keys.gitHubToken)
-            UserDefaults.standard.removeObject(forKey: Keys.gitHubToken)
-        }
-    }
-
-    @Published var scheduledExportEnabled: Bool {
-        didSet {
-            UserDefaults.standard.set(scheduledExportEnabled, forKey: Keys.scheduledExport)
-            if oldValue != scheduledExportEnabled {
-                _ = ScheduledExport.setEnabled(scheduledExportEnabled)
-            }
-        }
-    }
-
     private enum Keys {
         static let debugMode = "debugMode"
         static let storageLocation = "storageLocation"
         static let customStoragePath = "customStoragePath"
-        static let autoCheckUpdates = "autoCheckUpdates"
-        static let gitHubToken = "gitHubToken"
-        static let scheduledExport = "scheduledExportEnabled"
     }
 
     private init() {
@@ -76,37 +51,15 @@ final class AppPreferences: ObservableObject {
         let rawLoc = UserDefaults.standard.string(forKey: Keys.storageLocation) ?? StorageLocation.iCloud.rawValue
         storageLocation = StorageLocation(rawValue: rawLoc) ?? .iCloud
         customStoragePath = UserDefaults.standard.string(forKey: Keys.customStoragePath) ?? ""
-        if UserDefaults.standard.object(forKey: Keys.autoCheckUpdates) == nil {
-            autoCheckUpdates = true
-        } else {
-            autoCheckUpdates = UserDefaults.standard.bool(forKey: Keys.autoCheckUpdates)
-        }
-        let fromKeychain = KeychainStore.string(for: Keys.gitHubToken) ?? ""
-        let fromDefaults = UserDefaults.standard.string(forKey: Keys.gitHubToken) ?? ""
-        gitHubToken = fromKeychain.isEmpty ? fromDefaults : fromKeychain
-        if !fromDefaults.isEmpty && fromKeychain.isEmpty {
-            KeychainStore.set(fromDefaults, for: Keys.gitHubToken)
-            UserDefaults.standard.removeObject(forKey: Keys.gitHubToken)
-        } else if !fromDefaults.isEmpty {
-            UserDefaults.standard.removeObject(forKey: Keys.gitHubToken)
-        }
-        scheduledExportEnabled = UserDefaults.standard.bool(forKey: Keys.scheduledExport)
     }
 
     func reset() {
         debugMode = false
         storageLocation = .iCloud
         customStoragePath = ""
-        autoCheckUpdates = true
-        gitHubToken = ""
-        scheduledExportEnabled = false
         UserDefaults.standard.removeObject(forKey: Keys.debugMode)
         UserDefaults.standard.removeObject(forKey: Keys.storageLocation)
         UserDefaults.standard.removeObject(forKey: Keys.customStoragePath)
-        UserDefaults.standard.removeObject(forKey: Keys.autoCheckUpdates)
-        UserDefaults.standard.removeObject(forKey: Keys.gitHubToken)
-        UserDefaults.standard.removeObject(forKey: Keys.scheduledExport)
-        KeychainStore.set("", for: Keys.gitHubToken)
-        _ = ScheduledExport.setEnabled(false)
+        ScheduledExport.remove()
     }
 }

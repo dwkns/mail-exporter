@@ -73,16 +73,10 @@ python3 -m engine seed          # example jobs (edit From addresses before a rea
 python3 -m engine list
 python3 -m engine export --dry-run --job-name DHL
 python3 -m engine export --json --job-name DHL
-python3 -m engine append-draft Drafts/001_who_subject.md   # Mail draft only — never sends
+python3 -m engine append-draft Drafts/001_who_subject.md   # developer only — never sends
 ```
 
-From the **installed app** (no Python, what Cursor/Claude should run when you say “send it”):
-
-```bash
-/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft /absolute/path/to/Drafts/001_who_subject.md
-```
-
-That opens an Apple Mail **draft**. It never sends. `draft` is an alias for `append-draft`.
+Cursor and Claude do not run that command. They call MCP `compose_draft`. MailExporter.app opens the draft. It never sends.
 
 `--force-full` wipes existing `.eml` files for that job and re-exports.
 
@@ -182,7 +176,7 @@ Examples: `001_supplier_inquiry.md`, `014_contractor_quote.md`.
 
 Keep the same filename when moving `Drafts/` → `Sent/`. Move (do not copy or delete) only when an exported `.eml` matches To / Subject / thread — the job must include Sent mail. If it is unclear, leave the file in `Drafts/`.
 
-Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space (`a.pdf, b.pdf`). After the draft opens, `compose_draft` / `append-draft` report attached vs requested and do not return a silent OK if they differ.
+Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space (`a.pdf, b.pdf`). After the draft opens, `compose_draft` reports attached vs requested and does not return a silent OK if they differ.
 
 ---
 
@@ -221,15 +215,7 @@ Do **not** add this server under **Customize → Connectors → Add custom conne
 
 ## Updates
 
-The app you use is updated in place by `./apps/MailExporter/build.sh`. That keeps the stamp macOS already approved.
-
-**Check for Updates** will not replace that app with a download stamped differently. A download for another Mac is published separately and is not copied on top of the app you use.
-
-```bash
-./scripts/sparkle-publish-on-mini.sh vX.Y.Z
-```
-
-That command can run on any Mac that already has the Developer ID certificate and the Sparkle key. The Mini is not required. See `apps/MailExporter/signing/SPARKLE.md`.
+The app you use is updated in place by `./apps/MailExporter/build.sh`. That keeps the permission macOS already approved. The app does not download a new copy of itself.
 
 ## Safety
 
@@ -243,5 +229,3 @@ This project only **reads** Mail data and writes `.eml` files to folders you cho
 | [`engine/`](engine/) | Python export engine (criteria matching, `.emlx` + attachments) |
 | [`mailexporter_mcp/`](mailexporter_mcp/) | Local MCP server for Cursor / Claude / Cowork |
 | [`skills/mail-exporter/`](skills/mail-exporter/) | Cursor/Claude skill (howto, never-send) |
-| [`scripts/sparkle-publish-on-mini.sh`](scripts/sparkle-publish-on-mini.sh) | Publish a download for another Mac. Does not replace the app you use. |
-| [`apps/MailExporter/signing/SPARKLE.md`](apps/MailExporter/signing/SPARKLE.md) | How that download is signed |

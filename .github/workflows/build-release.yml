@@ -36,7 +36,6 @@ jobs:
 
       - name: Typecheck Swift UI
         run: |
-          SPARKLE_DIR="$(./apps/MailExporter/ensure-sparkle.sh)"
           SRC="apps/MailExporter/Sources"
           SWIFT_FILES=()
           while IFS= read -r -d '' f; do
@@ -47,9 +46,7 @@ jobs:
             -typecheck \
             -sdk "$(xcrun --show-sdk-path)" \
             -target arm64-apple-macos13 \
-            -parse-as-library \
-            -F "${SPARKLE_DIR}" \
-            -framework Sparkle
+            -parse-as-library
 
   build:
     name: Build MailExporter macOS App

@@ -240,3 +240,146 @@ def seed_dhl_job() -> Job:
             }
         ),
     )
+
+
+def output_dir_error(raw: str) -> str | None:
+    """Refuse the disk root and any folder inside Apple Mail."""
+    text = (raw or "").strip()
+    if not text:
+        return "output_dir required"
+    try:
+        path = Path(text).expanduser().resolve()
+    except OSError:
+        path = Path(text).expanduser()
+    if path == Path("/"):
+        return "That folder can’t be used."
+    mail = (Path.home() / "Library" / "Mail").resolve()
+    if path == mail or mail in path.parents:
+        return "That folder is inside Apple Mail. Choose a different folder."
+    return None
+
+
+def _opt_bool(raw: Any, current: bool) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return current
+    text = str(raw).strip().lower()
+    if not text:
+        return current
+    if text in ("1", "true", "yes"):
+        return True
+    if text in ("0", "false", "no"):
+        return False
+    return current
+
+
+def _job_public(job: Job) -> dict[str, Any]:
+    row = job.to_dict()
+    row.pop("match", None)
+    return row
+
+
+def apply_job_command(req: dict[str, Any], config: Path) -> dict[str, Any]:
+    """Create or change a job. Callers outside the app must ask the app to run this."""
+    cmd = str(req.get("cmd") or "")
+    if cmd == "create-job":
+        return _create_job(req, config)
+    if cmd == "edit-job":
+        return _edit_job(req, config)
+    return {"ok": False, "error": f"unknown cmd: {cmd}"}
+
+
+def _create_job(req: dict[str, Any], config: Path) -> dict[str, Any]:
+    from engine.howto import write_how_to
+    from engine.project import resolved_project_root
+
+    name = str(req.get("name") or "").strip()
+    output_dir = str(req.get("outputDir") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name required"}
+    folder_error = output_dir_error(output_dir)
+    if folder_error:
+        return {"ok": False, "error": folder_error}
+    raw_match = req.get("match")
+    if raw_match is None:
+        raw_match = {
+            "conjunction": "any",
+            "conditions": [
+                {"field": "entire", "op": "contains", "values": [name]}
+            ],
+        }
+    if not isinstance(raw_match, dict):
+        return {"ok": False, "error": "match must be an object"}
+    try:
+        match = parse_match(raw_match)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    jobs = load_jobs(config)
+    if any(j.name.lower() == name.lower() for j in jobs.jobs):
+        return {"ok": False, "error": f"job already exists: {name}"}
+    job = Job(
+        id=str(uuid.uuid4()),
+        name=name,
+        output_dir=output_dir,
+        match=match,
+        include_sent=_opt_bool(req.get("includeSent", True), True),
+        include_bin=_opt_bool(req.get("includeBin", False), False),
+        include_thread=_opt_bool(req.get("includeThread", False), False),
+        project_dir=str(resolved_project_root(output_dir)),
+    )
+    jobs.jobs.append(job)
+    save_jobs(jobs, config)
+    try:
+        write_how_to(Path(output_dir), mailbox_name=name)
+    except Exception:
+        pass
+    return {"ok": True, "job": _job_public(job), "config": str(config)}
+
+
+def _edit_job(req: dict[str, Any], config: Path) -> dict[str, Any]:
+    from engine.project import resolved_project_root
+
+    job_id = str(req.get("jobId") or "").strip()
+    job_name = str(req.get("jobName") or "").strip()
+    jobs = load_jobs(config)
+    target = None
+    if job_id:
+        for job in jobs.jobs:
+            if job.id == job_id:
+                target = job
+                break
+        if target is None:
+            return {"ok": False, "error": f"job id not found: {job_id}"}
+    elif job_name:
+        needle = job_name.lower()
+        for job in jobs.jobs:
+            if job.name.lower() == needle:
+                target = job
+                break
+        if target is None:
+            return {"ok": False, "error": f"job name not found: {job_name}"}
+    else:
+        return {"ok": False, "error": "provide job_id or job_name"}
+    assert target is not None
+    new_name = str(req.get("name") or "").strip()
+    if new_name:
+        target.name = new_name
+    new_dir = str(req.get("outputDir") or "").strip()
+    if new_dir:
+        folder_error = output_dir_error(new_dir)
+        if folder_error:
+            return {"ok": False, "error": folder_error}
+        target.output_dir = new_dir
+        target.project_dir = str(resolved_project_root(target.output_dir))
+    raw_match = req.get("match")
+    if isinstance(raw_match, dict):
+        try:
+            target.match = parse_match(raw_match)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    target.include_sent = _opt_bool(req.get("includeSent"), target.include_sent)
+    target.include_bin = _opt_bool(req.get("includeBin"), target.include_bin)
+    target.include_thread = _opt_bool(req.get("includeThread"), target.include_thread)
+    save_jobs(jobs, config)
+    return {"ok": True, "job": _job_public(target), "config": str(config)}

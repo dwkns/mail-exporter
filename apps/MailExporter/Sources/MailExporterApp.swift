@@ -1,5 +1,4 @@
 import AppKit
-import Sparkle
 import SwiftUI
 
 extension Notification.Name {
@@ -7,6 +6,7 @@ extension Notification.Name {
     static let mailExporterExportAll = Notification.Name("mailExporterExportAll")
     static let mailExporterExportJob = Notification.Name("mailExporterExportJob")
     static let mailExporterShowFolder = Notification.Name("mailExporterShowFolder")
+    static let mailExporterConfirmExportAll = Notification.Name("mailExporterConfirmExportAll")
     static let mailExporterPermissionsChanged = Notification.Name("mailExporterPermissionsChanged")
     static let mailExporterExternalExport = Notification.Name("mailExporterExternalExport")
 }
@@ -19,7 +19,7 @@ enum MailExporterURL {
             .lowercased()
         switch host {
         case "export-all", "export":
-            NotificationCenter.default.post(name: .mailExporterExportAll, object: nil)
+            NotificationCenter.default.post(name: .mailExporterConfirmExportAll, object: nil)
         case "export-job":
             let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?
@@ -84,9 +84,6 @@ struct MailExporterApp: App {
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             }
-            CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: SparkleController.shared.updater)
-            }
         }
 
         Settings {
@@ -112,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWindow.allowsAutomaticWindowTabbing = false
         AppCommandServer.start()
         EngineBridge.prewarm()
-        _ = AppUpdater.shared
+        ScheduledExport.remove()
         // Finder sometimes passes paths as argv when launching by drop.
         let argvFiles = CommandLine.arguments.dropFirst().compactMap { arg -> URL? in
             if arg.hasPrefix("-") { return nil }

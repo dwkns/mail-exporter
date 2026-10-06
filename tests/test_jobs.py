@@ -319,3 +319,19 @@ def test_local_pref_wins_over_leftover_ubiquity(
     assert default_jobs_path() == local_path
 
 
+def test_refuse_job_folder_inside_mail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    from engine.jobs import apply_job_command, output_dir_error
+
+    mail = tmp_path / "Library" / "Mail" / "V10" / "in.mbox"
+    mail.mkdir(parents=True)
+    assert "Apple Mail" in (output_dir_error(str(mail)) or "")
+    config = tmp_path / "jobs.json"
+    refused = apply_job_command(
+        {"cmd": "create-job", "name": "Bad", "outputDir": str(mail)},
+        config,
+    )
+    assert refused["ok"] is False
+    assert not config.exists()
+
+

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from engine.criteria import parse_match
@@ -123,6 +124,73 @@ def test_incremental_export_writes_then_skips(tmp_path: Path, monkeypatch) -> No
     assert len(list(out.glob("*.eml"))) == 1
 
 
+def test_refresh_when_message_changes(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<a@x>", subject="Your invoice", body="hello invoice"),
+    )
+    paths = [p1]
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: paths)
+    job = _job(tmp_path)
+    run_job(job)
+    p1.write_bytes(_emlx(_rfc822(mid="<a@x>", subject="Your invoice", body="hello invoice updated")))
+    again = run_job(job)
+    assert again["newlyWritten"] == 0
+    text = list(Path(job.output_dir).glob("*.eml"))[0].read_text(encoding="utf-8")
+    assert "updated" in text
+
+
+def test_existing_copy_without_stamp_is_not_new(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(mail, "1.emlx", _rfc822(mid="<a@x>", subject="Your invoice"))
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    run_job(job)
+    out = Path(job.output_dir)
+    state_path = out / ".exported-ids.json"
+    state = load_state(state_path)
+    state.pop("sourceHashes", None)
+    state_path.write_text(json.dumps(state) + "\n", encoding="utf-8")
+    again = run_job(job)
+    assert again["newlyWritten"] == 0
+    assert again["line"] == "Up to date"
+    saved = load_state(state_path)
+    assert saved.get("sourceHashes")
+
+
+def test_prune_when_message_stops_matching(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(mail, "1.emlx", _rfc822(mid="<a@x>", subject="Your invoice"))
+    p2 = _write_emlx(mail, "2.emlx", _rfc822(mid="<b@x>", subject="Another invoice"))
+    paths = [p1, p2]
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: list(paths))
+    job = _job(tmp_path)
+    first = run_job(job)
+    assert first["newlyWritten"] == 2
+    paths.remove(p2)
+    p2.write_bytes(_emlx(_rfc822(mid="<b@x>", subject="newsletter", body="no match")))
+    again = run_job(job)
+    names = [p.name for p in Path(job.output_dir).glob("*.eml")]
+    assert len(names) == 1
+    assert again["orphansRemoved"] >= 1
+
+
+def test_one_copy_per_message(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail"
+    p1 = _write_emlx(mail, "1.emlx", _rfc822(mid="<a@x>", subject="Your invoice"))
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    run_job(job)
+    out = Path(job.output_dir)
+    extra = out / "duplicate.eml"
+    extra.write_bytes(next(out.glob("*.eml")).read_bytes())
+    assert len(list(out.glob("*.eml"))) == 2
+    run_job(job)
+    assert len(list(out.glob("*.eml"))) == 1
+
+
 def test_force_full_rewrites(tmp_path: Path, monkeypatch) -> None:
     mail = tmp_path / "mail"
     p1 = _write_emlx(
@@ -138,7 +206,7 @@ def test_force_full_rewrites(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_promote_drafts_to_sent(tmp_path: Path, monkeypatch) -> None:
-    mail = tmp_path / "mail"
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
     p1 = _write_emlx(
         mail,
         "1.emlx",
@@ -150,13 +218,80 @@ def test_promote_drafts_to_sent(tmp_path: Path, monkeypatch) -> None:
     drafts.mkdir(parents=True)
     md = drafts / "001_client_quote-follow-up.md"
     md.write_text(
-        "---\nTo: a@b.com\nSubject: Quote follow-up\nIn-Reply-To: <sent@x>\n---\n\nHi\n",
+        "---\nTo: a@b.com\nSubject: Quote follow-up\nMessage-ID: <sent@x>\n---\n\nHi\n",
         encoding="utf-8",
     )
     result = run_job(job)
     assert result["draftsPromoted"] == 1
     assert not md.exists()
     assert (Path(job.output_dir) / "Sent" / md.name).is_file()
+
+
+def test_inbox_reply_does_not_move_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "INBOX.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<inbox@x>", subject="Mortgage Next Steps", body="invoice question"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "002_thomas-heneghan_mortgage-next-steps.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: Re: Mortgage Next Steps\n"
+        "In-Reply-To: <inbox@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 0
+    assert md.is_file()
+    assert not (Path(job.output_dir) / "Sent" / md.name).exists()
+
+
+def test_sent_subject_and_date_moves_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<new-sent@x>", subject="Re: Quote follow-up", body="invoice sent"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "001_client_quote-follow-up.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: Quote follow-up\n"
+        "Date: Wed, 5 Mar 2026 10:00:00 +0000\n"
+        "In-Reply-To: <other@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 1
+    assert (Path(job.output_dir) / "Sent" / md.name).is_file()
+
+
+def test_sent_subject_without_date_does_not_move_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<new-sent@x>", subject="Quote follow-up", body="invoice sent"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "001_client_quote-follow-up.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: Quote follow-up\nIn-Reply-To: <other@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 0
+    assert md.is_file()
 
 
 def test_thread_complete_adds_parent(tmp_path: Path, monkeypatch) -> None:

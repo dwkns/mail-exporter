@@ -142,6 +142,30 @@ def test_silent_ok_with_requested_attach_is_refused(tmp_path: Path) -> None:
     assert "silent OK" in result["error"]
 
 
+def test_failure_result_is_not_ok_when_stdout_is_ok(tmp_path: Path) -> None:
+    md = tmp_path / "d.md"
+    (tmp_path / "a.pdf").write_bytes(b"%PDF")
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: x\nAttach: a.pdf\n---\n\nhi\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "MakeMailDraft.applescript"
+    script.write_text("-- stub\n", encoding="utf-8")
+    proc = MagicMock(
+        returncode=1,
+        stdout="OK\n",
+        stderr="execution error: The draft has 0. attached 0 of 1 (2)\n",
+    )
+    with (
+        patch("engine.compose_draft.applescript_path", return_value=script),
+        patch("engine.compose_draft.subprocess.run", return_value=proc),
+    ):
+        result = compose_draft(md)
+    assert result["ok"] is False
+    assert result["result"] == "attached 0 of 1"
+    assert result["result"] != "OK"
+
+
 def test_partial_attach_count_fails(tmp_path: Path) -> None:
     md = tmp_path / "d.md"
     (tmp_path / "a.pdf").write_bytes(b"%PDF")

@@ -74,10 +74,7 @@ download_release_zip() {
   if command -v gh >/dev/null 2>&1; then
     echo "Checking for latest release via GitHub CLI…"
     if gh release download --repo "${REPO}" --pattern "MailExporter-*.zip*" --dir "${TMP_DIR}" 2>/dev/null; then
-      FOUND_ZIP="$(find "${TMP_DIR}" -name "MailExporter-*-sparkle.zip" | head -1)"
-      if [[ -z "${FOUND_ZIP}" ]]; then
-        FOUND_ZIP="$(find "${TMP_DIR}" -name "MailExporter-*.zip" ! -name "*.sha256" | head -1)"
-      fi
+      FOUND_ZIP="$(find "${TMP_DIR}" -name "MailExporter-*.zip" ! -name "*sparkle*" ! -name "*.sha256" | head -1)"
       FOUND_SUM="$(find "${TMP_DIR}" -name "MailExporter-*.sha256" | head -1)"
       if [[ -n "${FOUND_ZIP}" ]]; then
         ZIP_PATH="${FOUND_ZIP}"

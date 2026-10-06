@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UserNotifications
 
 struct ComposeResult: Equatable {
     var ok: Bool
@@ -117,7 +118,7 @@ enum ComposeBridge {
             let parsed = AttachCountCheck.parse(blob)
             let summary: String
             if let parsed, parsed.attached != parsed.requested {
-                summary = "Attachments missing (\(parsed.attached) of \(parsed.requested))"
+                summary = "Attachment count is wrong (\(parsed.attached) of \(parsed.requested))"
             } else if process.terminationStatus != 0 {
                 summary = "Compose failed"
             } else {
@@ -133,5 +134,41 @@ enum ComposeBridge {
             ? "Draft opened in Mail"
             : "\(mdFiles.count) drafts opened in Mail"
         return ComposeResult(ok: true, summary: summary, detail: detail)
+    }
+}
+
+enum DraftNotifier {
+    /// Tell the user the draft work has finished, including file attachment.
+    static func announce(_ result: ComposeResult, draftCount: Int) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "MailExporter"
+            content.body = message(for: result, draftCount: draftCount)
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+            center.add(request, withCompletionHandler: nil)
+        }
+    }
+
+    static func message(for result: ComposeResult, draftCount: Int) -> String {
+        let count = max(draftCount, 1)
+        let draftWord = count == 1 ? "Draft ready." : "\(count) drafts ready."
+        if let counts = AttachCountCheck.parse(result.detail), counts.requested > 0 {
+            let files = "\(counts.attached) of \(counts.requested) files attached."
+            if result.ok {
+                return "\(draftWord) \(files)"
+            }
+            return "Draft not ready. \(files)"
+        }
+        if result.ok {
+            return draftWord
+        }
+        return result.summary
     }
 }

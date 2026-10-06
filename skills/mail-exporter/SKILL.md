@@ -7,21 +7,13 @@ description: Export Apple Mail with MailExporter jobs, read .eml context, write 
 
 Criteria jobs copy matching Apple Mail messages to a folder of `.eml` files. Assistants read that folder, write Markdown in `Drafts/`, and open an Apple Mail **draft**. The owner sends. MailExporter never sends and never deletes Mail.
 
-## Installed helper (prefer this)
+## Ask the app
 
-```bash
-/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine
-```
+Cursor and Claude do not open Apple Mail’s private folder. They do not start the mail program.
 
-Subcommands: `list`, `export`, `export --json`, `append-draft` (alias `draft`), `mcp`.
+Use the MCP tools. MailExporter.app copies the mail, opens the draft, and saves the job.
 
-When the owner says **send it**, write `Drafts/NNN_who_subject.md` (do not invent content) and run:
-
-```bash
-/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine append-draft /absolute/path/to/Drafts/NNN_who_subject.md
-```
-
-That opens a draft. It never sends.
+When the owner says **send it**, write `Drafts/NNN_who_subject.md` (do not invent content) and call `compose_draft` with that path. That opens a draft. It never sends.
 
 ## MCP
 
@@ -29,7 +21,7 @@ Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`
 
 `export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
 
-`read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder**. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space. After the draft opens, `compose_draft` / `append-draft` report attached vs requested and fail if they differ.
+`read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder**. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space. After the draft opens, `compose_draft` reports attached vs requested and fails if they differ. Do not put a job folder inside Apple Mail’s private folder.
 
 ## First read
 
@@ -63,4 +55,4 @@ After the owner sends, the next export can move matching Markdown from `Drafts/`
 
 ## Permissions
 
-Full Disk Access for whoever scans Mail (MailExporter, Cursor, Claude, or Terminal). Accessibility for rich paste. Automation → Mail for drafts.
+Full Disk Access is only for MailExporter. Cursor and Claude do not need it. Accessibility is for rich paste. Automation → Mail is for drafts. MailExporter opens the draft.

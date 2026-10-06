@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -10,7 +11,10 @@ from pathlib import Path
 from .criteria import decode_mime_header, header_value, match_message, spec_needs_body
 from .discover import candidate_paths
 from .jobs import Job
+from email.utils import parsedate_to_datetime
+
 from .mailio import (
+    SKIP_PATH_PARTS_SENT,
     attachments_dir_for,
     load_message_bytes,
     message_stable_id,
@@ -54,42 +58,51 @@ def save_state(path: Path, state: dict) -> None:
         "ids": list(state.get("ids") or []),
         "files": dict(state.get("files") or {}),
     }
-    if "watermarkMtime" in state:
-        out["watermarkMtime"] = state["watermarkMtime"]
+    hashes = state.get("sourceHashes")
+    if isinstance(hashes, dict):
+        out["sourceHashes"] = {str(k): str(v) for k, v in hashes.items()}
     if "matchHash" in state:
         out["matchHash"] = state["matchHash"]
     path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
 
 
 def prune_orphans(output_dir: Path, keep_ids: set[str], files: dict[str, str] | None = None) -> int:
+    """Remove copies that no longer match, and extra copies of the same message."""
     removed = 0
     known = files or {}
     remaining: dict[str, str] = {}
     seen_files: set[Path] = set()
-    for mid, name in known.items():
-        path = output_dir / name
-        if mid not in keep_ids:
-            try:
+    kept_ids: set[str] = set()
+
+    def drop(path: Path) -> None:
+        nonlocal removed
+        try:
+            if path.is_file():
                 path.unlink()
                 removed += 1
-            except OSError:
-                pass
+        except OSError:
+            pass
+
+    for mid, name in list(known.items()):
+        path = output_dir / name
+        if mid not in keep_ids or mid in kept_ids:
+            drop(path)
             continue
         if path.is_file():
             remaining[mid] = name
             seen_files.add(path.resolve())
+            kept_ids.add(mid)
     for path in list(output_dir.glob("*.eml")):
-        if path.resolve() in seen_files:
+        resolved = path.resolve()
+        if resolved in seen_files:
             continue
         mid = message_id_from_eml_file(path)
-        if mid is None or mid not in keep_ids:
-            try:
-                path.unlink()
-                removed += 1
-            except OSError:
-                pass
-        else:
-            remaining[mid] = path.name
+        if mid is None or mid not in keep_ids or mid in kept_ids:
+            drop(path)
+            continue
+        remaining[mid] = path.name
+        seen_files.add(resolved)
+        kept_ids.add(mid)
     if files is not None:
         files.clear()
         files.update(remaining)
@@ -308,40 +321,90 @@ def write_attachments_sidecar(output_dir: Path, stable_id: str, emlx_path: Path)
     return written
 
 
+def _front_matter(text: str) -> dict[str, str]:
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end < 0:
+        return {}
+    fields: dict[str, str] = {}
+    for line in text[3:end].splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        fields[key.strip().lower()] = value.strip()
+    return fields
+
+
+def _norm_subject(subject: str) -> str:
+    text = " ".join(subject.strip().lower().split())
+    changed = True
+    while changed:
+        changed = False
+        for prefix in ("re:", "fwd:", "fw:"):
+            if text.startswith(prefix):
+                text = text[len(prefix) :].strip()
+                changed = True
+    return text
+
+
+def _message_day(raw: str):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return parsedate_to_datetime(raw).date()
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+
+
+def _id_token(raw: str) -> str:
+    return raw.strip().strip("<>").lower()
+
+
+def _is_sent_source(path: Path) -> bool:
+    text = path.as_posix()
+    return any(part in text for part in SKIP_PATH_PARTS_SENT)
+
+
 def promote_drafts_to_sent(output_dir: Path, matches: list[tuple[Path, bytes, int]]) -> int:
+    """Move a draft only when a sent message matches it.
+
+    An inbox Message-ID in In-Reply-To is not a sent copy. A subject inside
+    the filename is not enough. Match the draft's own Message-ID to a sent
+    message, or match subject and date.
+    """
     drafts = output_dir / "Drafts"
     sent = output_dir / "Sent"
     if not drafts.is_dir():
         return 0
     sent.mkdir(exist_ok=True)
-    ids: set[str] = set()
-    subjects: set[str] = set()
-    for _path, raw, _ in matches:
-        mid = header_value(raw, "Message-ID") or header_value(raw, "Message-Id")
-        if mid:
-            ids.add(mid.strip().lower())
-        subj = decode_mime_header(header_value(raw, "Subject")).strip().lower()
-        if subj.startswith("re:"):
-            subj = subj[3:].strip()
-        if subj:
-            subjects.add(subj)
+    sent_msgs: list[tuple[str, str, object]] = []
+    for path, raw, _ in matches:
+        if not _is_sent_source(path):
+            continue
+        mid = header_value(raw, "Message-ID") or header_value(raw, "Message-Id") or ""
+        subj = _norm_subject(decode_mime_header(header_value(raw, "Subject")))
+        day = _message_day(header_value(raw, "Date"))
+        sent_msgs.append((_id_token(mid), subj, day))
     moved = 0
     for md in list(drafts.glob("*.md")):
         try:
             text = md.read_text(encoding="utf-8")
         except OSError:
             continue
-        lower = text.lower()
+        fields = _front_matter(text)
+        own_id = _id_token(fields.get("message-id", ""))
+        draft_subject = _norm_subject(fields.get("subject", ""))
+        draft_day = _message_day(fields.get("date", ""))
         hit = False
-        for mid in ids:
-            token = mid.strip("<>")
-            if token and token in lower:
+        for mid, subj, day in sent_msgs:
+            if own_id and mid and own_id == mid:
                 hit = True
                 break
-        if not hit:
-            name_subj = md.stem.lower()
-            if any(s and s in name_subj for s in subjects):
+            if draft_subject and draft_day and subj == draft_subject and day == draft_day:
                 hit = True
+                break
         if not hit:
             continue
         dest = sent / md.name
@@ -365,21 +428,13 @@ def run_job(
     state_file = output_dir / ".exported-ids.json"
     state = load_state(state_file) if not dry_run else {"ids": [], "files": {}}
     current_hash = match_hash(job)
-    watermark = None
-    if (
-        not dry_run
-        and not force_full
-        and state.get("matchHash") == current_hash
-        and isinstance(state.get("watermarkMtime"), (int, float))
-    ):
-        watermark = float(state["watermarkMtime"])
-
+    # Always read the current matches. A time watermark left old copies in place
+    # when a message changed or stopped matching.
     matches = collect_matches(
         job,
         dry_run=dry_run,
         timings=timings,
         candidates=candidates,
-        watermark_mtime=watermark,
     )
     match_count = len(matches)
     keep_ids = {message_stable_id(msg, path) for path, msg, _ in matches}
@@ -407,6 +462,11 @@ def run_job(
     write_how_to(output_dir, mailbox_name=job.name)
 
     files = dict(state.get("files") or {})
+    source_hashes = {
+        str(k): str(v)
+        for k, v in (state.get("sourceHashes") or {}).items()
+        if isinstance(state.get("sourceHashes"), dict)
+    }
     if force_full:
         for path in output_dir.glob("*.eml"):
             try:
@@ -415,28 +475,28 @@ def run_job(
                 pass
         state = {"ids": [], "files": {}}
         files = {}
+        source_hashes = {}
         save_state(state_file, state)
 
-    if watermark is None:
-        orphans = prune_orphans(output_dir, keep_ids, files)
-    else:
-        orphans = 0
-        keep_ids = keep_ids | set(files)
-    exported = set(files) | set(state.get("ids") or [])
+    orphans = prune_orphans(output_dir, keep_ids, files)
+    source_hashes = {k: v for k, v in source_hashes.items() if k in files}
     newly_written = 0
     attachments_filled = 0
     sidecar_written = 0
     errors = 0
     t_attach = 0.0
-    newest_mtime = watermark or 0.0
 
     for path, raw_bytes, _ in matches:
-        try:
-            newest_mtime = max(newest_mtime, path.stat().st_mtime)
-        except OSError:
-            pass
         sid = message_stable_id(raw_bytes, path)
-        if sid in exported and not force_full:
+        digest = hashlib.sha256(raw_bytes).hexdigest()[:16]
+        old_name = files.get(sid)
+        old_path = output_dir / old_name if old_name else None
+        already = old_path is not None and old_path.is_file()
+        stored = source_hashes.get(sid)
+        # A copy that is already in the folder is not new. A missing stamp
+        # only means this is the first run after the count was added.
+        if not force_full and already and (stored is None or stored == digest):
+            source_hashes[sid] = digest
             continue
         t_a = time.perf_counter()
         try:
@@ -466,8 +526,9 @@ def run_job(
             errors += 1
             continue
         files[sid] = filename
-        exported.add(sid)
-        newly_written += 1
+        source_hashes[sid] = digest
+        if not already:
+            newly_written += 1
         attachments_filled += filled
         sidecar_written += write_attachments_sidecar(output_dir, sid, path)
 
@@ -476,14 +537,14 @@ def run_job(
     state = {
         "ids": sorted(files),
         "files": files,
-        "watermarkMtime": newest_mtime,
+        "sourceHashes": {k: source_hashes[k] for k in files if k in source_hashes},
         "matchHash": current_hash,
     }
     save_state(state_file, state)
     if timings is not None:
         timings["attach_write_s"] = round(t_attach, 3)
         timings["newly_written"] = newly_written
-    count_ok = folder_count == match_count or watermark is not None
+    count_ok = folder_count == match_count
     if newly_written == 0:
         line = "Up to date"
     else:

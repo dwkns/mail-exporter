@@ -56,13 +56,15 @@ def test_mcp_compose_draft_routes(tmp_path: Path) -> None:
     )
     import mailexporter_mcp as m
 
-    with patch("mailexporter_mcp._compose_draft") as compose:
-        compose.return_value = {"ok": True, "via": "mail"}
+    with patch("mailexporter_mcp._ask_app") as ask:
+        ask.return_value = {"ok": True, "via": "app"}
         raw = m.compose_draft(path=str(md))
     data = json.loads(raw)
     assert data["ok"] is True
-    assert data["via"] == "mail"
-    compose.assert_called_once()
+    assert data["via"] == "app"
+    ask.assert_called_once()
+    assert ask.call_args.args[0]["cmd"] == "compose"
+    assert ask.call_args.args[0]["path"] == str(md)
 
 
 def test_mcp_compose_draft_missing_args() -> None:
@@ -183,8 +185,14 @@ def test_mcp_create_edit_and_list_drafts(
     monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
     import importlib
     import mailexporter_mcp as m
+    from engine.jobs import apply_job_command
 
     importlib.reload(m)
+
+    def _local_ask(req):
+        return apply_job_command(req, config)
+
+    monkeypatch.setattr(m, "_ask_app", _local_ask)
     created = json.loads(
         m.create_job(
             name="Invoices",

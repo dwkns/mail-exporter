@@ -67,7 +67,17 @@ enum AppCommandServer {
                     NSLocalizedDescriptionKey: "Request must be a JSON object.",
                 ])
             }
-            response = try EngineSession.shared.performRaw(obj)
+            let cmd = obj["cmd"] as? String ?? ""
+            if cmd == "compose" {
+                response = composeResponse(obj)
+            } else if cmd == "create-job" || cmd == "edit-job" {
+                response = try EngineSession.shared.performRaw(obj)
+                DispatchQueue.main.async {
+                    JobsStore.current?.reload()
+                }
+            } else {
+                response = try EngineSession.shared.performRaw(obj)
+            }
         } catch {
             let err: [String: Any] = ["ok": false, "error": error.localizedDescription]
             if let data = try? JSONSerialization.data(withJSONObject: err),
@@ -83,5 +93,66 @@ enum AppCommandServer {
             guard let base = raw.baseAddress else { return }
             _ = write(client, base, raw.count)
         }
+    }
+
+    /// Open a Mail draft in this app. Cursor and Claude only pass the request.
+    private static func composeResponse(_ obj: [String: Any]) -> String {
+        let path = (obj["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let markdown = obj["markdown"] as? String ?? ""
+        let fileURL: URL
+        if !path.isEmpty {
+            fileURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            if !FileManager.default.fileExists(atPath: fileURL.path) {
+                return jsonLine(["ok": false, "error": "file not found: \(fileURL.path)"])
+            }
+        } else if !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let dir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/MailExporter/compose-inbox", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                fileURL = dir.appendingPathComponent("compose-\(Int(Date().timeIntervalSince1970)).md")
+                try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+            } catch {
+                return jsonLine(["ok": false, "error": error.localizedDescription])
+            }
+        } else {
+            return jsonLine(["ok": false, "error": "provide path or markdown"])
+        }
+        do {
+            let result = try ComposeBridge.compose(markdownFiles: [fileURL])
+            var payload: [String: Any] = [
+                "ok": result.ok,
+                "summary": result.summary,
+                "detail": result.detail,
+                "via": "app",
+            ]
+            if let counts = AttachCountCheck.parse(result.detail) {
+                payload["attached"] = counts.attached
+                payload["requested"] = counts.requested
+                payload["result"] = "attached \(counts.attached) of \(counts.requested)"
+            } else if result.ok {
+                payload["result"] = result.summary
+            } else {
+                let failure = result.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                payload["result"] = (failure.isEmpty || failure == "OK") ? "Compose failed" : failure
+            }
+            if result.ok == false, (payload["result"] as? String) == "OK" {
+                payload["result"] = "Compose failed"
+            }
+            DraftNotifier.announce(result, draftCount: 1)
+            return jsonLine(payload)
+        } catch {
+            let failed = ComposeResult(ok: false, summary: "Compose failed", detail: error.localizedDescription)
+            DraftNotifier.announce(failed, draftCount: 1)
+            return jsonLine(["ok": false, "error": error.localizedDescription])
+        }
+    }
+
+    private static func jsonLine(_ obj: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: obj),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{\"ok\":false,\"error\":\"request failed\"}"
+        }
+        return text
     }
 }
