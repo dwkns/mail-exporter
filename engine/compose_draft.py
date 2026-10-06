@@ -105,11 +105,27 @@ def compose_via_applescript(md_path: Path) -> dict:
             # Old script returned silent OK and never reported counts.
             mismatch = True
     ok = proc.returncode == 0 and not mismatch
+    if parsed and attached is not None:
+        count_text = f"attached {attached} of {requested}"
+    elif requested:
+        count_text = f"attached unknown of {requested}"
+    else:
+        count_text = ""
+    if ok:
+        result_text = count_text or out or "OK"
+    elif count_text and parsed:
+        result_text = count_text
+    elif err:
+        result_text = err
+    elif out and out != "OK":
+        result_text = out
+    else:
+        result_text = count_text or "compose failed"
     payload: dict = {
         "ok": ok,
         "via": "mail",
         "path": str(md_path),
-        "result": out or err or "OK",
+        "result": result_text,
         "stderr": err or None,
         "exit": proc.returncode,
         "attached": attached,
@@ -123,8 +139,9 @@ def compose_via_applescript(md_path: Path) -> dict:
             payload["error"] = (
                 f"attached unknown of {requested}; refused silent OK"
             )
-            if not out:
-                payload["result"] = payload["error"]
+            payload["result"] = payload["error"]
+    if not ok and payload["result"] == "OK":
+        payload["result"] = payload.get("error") or err or "compose failed"
     return payload
 
 

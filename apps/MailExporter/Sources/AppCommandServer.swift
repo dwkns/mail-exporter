@@ -129,6 +129,15 @@ enum AppCommandServer {
             if let counts = AttachCountCheck.parse(result.detail) {
                 payload["attached"] = counts.attached
                 payload["requested"] = counts.requested
+                payload["result"] = "attached \(counts.attached) of \(counts.requested)"
+            } else if result.ok {
+                payload["result"] = result.summary
+            } else {
+                let failure = result.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                payload["result"] = (failure.isEmpty || failure == "OK") ? "Compose failed" : failure
+            }
+            if result.ok == false, (payload["result"] as? String) == "OK" {
+                payload["result"] = "Compose failed"
             }
             DraftNotifier.announce(result, draftCount: 1)
             return jsonLine(payload)

@@ -206,7 +206,7 @@ def test_force_full_rewrites(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_promote_drafts_to_sent(tmp_path: Path, monkeypatch) -> None:
-    mail = tmp_path / "mail"
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
     p1 = _write_emlx(
         mail,
         "1.emlx",
@@ -218,13 +218,80 @@ def test_promote_drafts_to_sent(tmp_path: Path, monkeypatch) -> None:
     drafts.mkdir(parents=True)
     md = drafts / "001_client_quote-follow-up.md"
     md.write_text(
-        "---\nTo: a@b.com\nSubject: Quote follow-up\nIn-Reply-To: <sent@x>\n---\n\nHi\n",
+        "---\nTo: a@b.com\nSubject: Quote follow-up\nMessage-ID: <sent@x>\n---\n\nHi\n",
         encoding="utf-8",
     )
     result = run_job(job)
     assert result["draftsPromoted"] == 1
     assert not md.exists()
     assert (Path(job.output_dir) / "Sent" / md.name).is_file()
+
+
+def test_inbox_reply_does_not_move_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "INBOX.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<inbox@x>", subject="Mortgage Next Steps", body="invoice question"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "002_thomas-heneghan_mortgage-next-steps.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: Re: Mortgage Next Steps\n"
+        "In-Reply-To: <inbox@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 0
+    assert md.is_file()
+    assert not (Path(job.output_dir) / "Sent" / md.name).exists()
+
+
+def test_sent_subject_and_date_moves_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<new-sent@x>", subject="Re: Quote follow-up", body="invoice sent"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "001_client_quote-follow-up.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: Quote follow-up\n"
+        "Date: Wed, 5 Mar 2026 10:00:00 +0000\n"
+        "In-Reply-To: <other@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 1
+    assert (Path(job.output_dir) / "Sent" / md.name).is_file()
+
+
+def test_sent_subject_without_date_does_not_move_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(mid="<new-sent@x>", subject="Quote follow-up", body="invoice sent"),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "001_client_quote-follow-up.md"
+    md.write_text(
+        "---\nTo: a@b.com\nSubject: Quote follow-up\nIn-Reply-To: <other@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 0
+    assert md.is_file()
 
 
 def test_thread_complete_adds_parent(tmp_path: Path, monkeypatch) -> None:

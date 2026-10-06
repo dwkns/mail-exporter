@@ -330,6 +330,7 @@ on mmdMakeDraft(rawText, baseFolder)
 				end tell
 				set usedReply to true
 				mmdLog("reply: opened threaded reply")
+				mmdStamp("reply created")
 				-- Give Mail time to build the compose web body before we focus/paste.
 				delay 1.0
 			on error errMsg
@@ -403,6 +404,10 @@ on mmdMakeDraft(rawText, baseFolder)
 		end if
 		mmdReplyWithAttachments(newMessage, foundFiles, focusSubject, clipReady)
 	else
+		-- Files before the paste. A paste first stops Attach Files from keeping chips.
+		if (not usedReply) and ((count of foundFiles) > 0) then
+			mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
+		end if
 		-- Paste the formatted body in. We only ever paste once we have positively
 		-- identified the body area, so a failure here can never dump text into the
 		-- To field or overwrite the recipients.
@@ -414,6 +419,7 @@ on mmdMakeDraft(rawText, baseFolder)
 				-- quote intact. Never Cmd-A (that wiped the reply template).
 				-- New draft: body is empty, paste fills it.
 				tell application "System Events" to keystroke "v" using {command down}
+				mmdStamp("body pasted")
 				delay 0.6
 				if usedReply then
 					-- Blank line between our reply and the quoted original.
@@ -455,21 +461,15 @@ on mmdMakeDraft(rawText, baseFolder)
 				end if
 			end if
 		end if
-
-		-- New drafts: GUI Attach Files (AppleScript make new attachment is a no-op
-		-- on current Mail — it returns OK and leaves mail attachments at 0).
 		if (not usedReply) and ((count of foundFiles) > 0) then
-			set focusResult to mmdFocusMessageBody(focusSubject)
-			if focusResult is "ok" or focusResult is "ok-web" or focusResult is "ok-tab" then
-				tell application "System Events"
-					key code 125 using {command down}
-					delay 0.15
-					keystroke return
-					delay 0.1
-				end tell
+			set chips to mmdAttachmentDescriptions(focusSubject)
+			set my mmdAttachedCount to count of chips
+			mmdStamp("count after paste " & (count of chips))
+			if not mmdChipsMatchOnce(chips, foundFiles) then
+				set my mmdAttachMismatch to true
 			end if
-			mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
 		end if
+
 	end if
 
 	mmdCheckAttachmentCount(newMessage, focusSubject, attachSpecs, foundFiles)
@@ -518,7 +518,10 @@ end mmdApplyRecipients
 -- Reply + attachments via GUI Attach Files (does not wipe quote/body).
 -- Order: our reply text → attachments → native cited quote.
 on mmdReplyWithAttachments(newMessage, foundFiles, focusSubject, clipReady)
-	mmdLog("reply+attach: paste body then GUI Attach Files")
+	mmdLog("reply+attach: files first, then paste the reply")
+	-- Pasting first leaves this script in a state where Attach Files does not
+	-- keep the chips. Add the files, then paste the reply above the quote.
+	mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
 
 	tell application "Mail" to activate
 	delay 0.35
@@ -536,22 +539,26 @@ on mmdReplyWithAttachments(newMessage, foundFiles, focusSubject, clipReady)
 				delay 0.2
 			end tell
 			mmdLog("reply+attach: pasted reply body above quote")
+			mmdStamp("body pasted")
+			set chips to mmdAttachmentDescriptions(focusSubject)
+			set my mmdAttachedCount to count of chips
+			mmdStamp("count after paste " & (my mmdAttachedCount))
+			if not mmdChipsMatchOnce(chips, foundFiles) then
+				set my mmdAttachMismatch to true
+			end if
 		else
-			set end of my mmdNotes to "Could not focus the reply body (" & focusResult & "). Attachments were skipped so the quoted original stays intact."
-			return
+			set end of my mmdNotes to "Could not focus the reply body (" & focusResult & "). The files were attached. Paste the reply above the quote."
 		end if
 	else
 		set end of my mmdNotes to "Reply body clipboard was empty; only the quoted original is in the draft."
 	end if
-
-	mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
 end mmdReplyWithAttachments
 
 
--- Modern Mail ignores AppleScript `make new attachment` (returns OK, count stays 0).
--- Open each file by its own path. Do not press Command-A in the file list:
--- that selects every file in the folder, so one Open adds the whole folder,
--- and the per-file loop adds that set again.
+-- `make new attachment` adds the file but deletes the quoted reply, so a
+-- threaded reply uses Attach Files. Go to the file, then click the nested
+-- Choose File button. Command-O closes the dialog and leaves the chip count
+-- at 0. Command-A selects every file in the folder.
 -- Count the attachment chips on the draft. Do not treat a larger Message
 -- Size as proof that the count matches the Attach line. A second copy of the
 -- same files still makes the message bigger.
@@ -578,6 +585,7 @@ on mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
 	delay 0.8
 	if not renamed then
 		mmdLog("compose window was not found")
+		mmdStamp("compose window was not found")
 		set my mmdAttachedCount to 0
 		set my mmdAttachMismatch to true
 		try
@@ -587,15 +595,17 @@ on mmdAttachFilesToDraft(newMessage, foundFiles, focusSubject)
 	end if
 	mmdRaiseCompose(tempSubject)
 	repeat with aFile in foundFiles
-		set posixPath to POSIX path of aFile
+		set posixPath to POSIX path of aFile as text
+		set fileName to mmdFileNameOfPOSIX(posixPath)
 		set okOne to mmdGUIAttachOneFile(posixPath, tempSubject)
-		mmdLog("attach one " & posixPath & " ok=" & okOne)
-		delay 0.35
+		mmdStamp("file " & fileName & " dialog " & okOne)
+		delay 0.5
 	end repeat
-	delay 0.4
+	delay 0.6
 	set chips to mmdAttachmentDescriptions(tempSubject)
 	set attached to count of chips
 	mmdLog("attach chips=" & attached & " requested=" & (count of foundFiles))
+	mmdStamp("count taken " & attached)
 	set my mmdAttachedCount to attached
 	if not mmdChipsMatchOnce(chips, foundFiles) then
 		set my mmdAttachMismatch to true
@@ -652,24 +662,69 @@ on mmdSetGoToFolder(winTitle, posixPath)
 			keystroke "g" using {command down, shift down}
 		end tell
 	end tell
-	delay 0.7
-	-- Setting the text field value reports success, but Mail does not go to
-	-- that folder. Type the path. Command-A replaces whatever is already there.
+	-- Command-A is only safe inside the Go to Folder field. If that field is
+	-- not focused, Command-A selects the draft and the next keys delete the
+	-- attachment chips.
+	set goReady to false
+	repeat 20 times
+		try
+			tell application "System Events"
+				tell process "Mail"
+					if exists window winTitle then
+						set hostSheet to sheet 1 of window winTitle
+						if (count of sheets of hostSheet) > 0 then
+							set goField to text field 1 of sheet 1 of hostSheet
+							set focused of goField to true
+							if focused of goField then set goReady to true
+						end if
+					end if
+				end tell
+			end tell
+		end try
+		if goReady then exit repeat
+		delay 0.15
+	end repeat
+	if not goReady then
+		mmdStamp("go to folder field missing")
+		return false
+	end if
+	set fileName to mmdFileNameOfPOSIX(posixPath)
+	set typedValue to ""
+	set typedOk to false
 	tell application "System Events"
 		tell process "Mail"
 			set frontmost to true
-			keystroke "a" using {command down}
-			delay 0.05
-			keystroke posixPath
-			delay 0.2
-			keystroke return
+			set hostSheet to sheet 1 of window winTitle
+			set goField to text field 1 of sheet 1 of hostSheet
+			set focused of goField to true
+			if focused of goField then
+				-- Setting the value does not navigate. Select the field, then type.
+				keystroke "a" using {command down}
+				delay 0.05
+				keystroke posixPath
+				delay 0.25
+				try
+					set typedValue to value of goField as text
+				end try
+				if typedValue contains fileName then
+					set typedOk to true
+					keystroke return
+				end if
+			end if
 		end tell
 	end tell
-	delay 0.9
+	if not typedOk then
+		mmdStamp("goto field not ready")
+		return false
+	end if
+	mmdStamp("goto field ready")
+	delay 0.8
+	return true
 end mmdSetGoToFolder
 
 
 on mmdGUIAttachOneFile(posixPath, winTitle)
+	mmdStamp("attach start " & mmdFileNameOfPOSIX(posixPath))
 	mmdRaiseCompose(winTitle)
 	tell application "System Events"
 		tell process "Mail"
@@ -686,23 +741,38 @@ on mmdGUIAttachOneFile(posixPath, winTitle)
 		return false
 	end if
 	try
-		mmdSetGoToFolder(winTitle, posixPath)
-		-- The confirm button has no name. Its title is "Choose File".
-		-- Command-O chooses the selected file. Send it only while the dialog
-		-- is open. A later Command-O hits the message and can drop the files.
+		set wentTo to mmdSetGoToFolder(winTitle, posixPath)
+		if not wentTo then
+			mmdLog("Go to Folder did not take the path")
+			mmdStamp("escape after go to folder failed")
+			try
+				tell application "System Events" to key code 53
+			end try
+			return false
+		end if
+		-- Command-O closes this dialog and does not attach the file.
+		-- The confirm control is a nested button. Its AXTitle is "Choose File".
+		-- It is not a direct button of the sheet, so click button "Choose File" misses it.
+		set clicked to false
 		tell application "System Events"
 			tell process "Mail"
 				set frontmost to true
 				if exists window winTitle then
 					if (count of sheets of window winTitle) > 0 then
-						try
-							set focused of sheet 1 of window winTitle to true
-						end try
-						keystroke "o" using {command down}
+						set clicked to my mmdClickTitledButton(sheet 1 of window winTitle, "Choose File")
 					end if
 				end if
 			end tell
 		end tell
+		mmdStamp("choose clicked " & clicked)
+		if not clicked then
+			mmdLog("Choose File button was not clicked")
+			mmdStamp("escape because Choose File was not clicked")
+			try
+				tell application "System Events" to key code 53
+			end try
+			return false
+		end if
 	on error errMsg
 		mmdLog("Attach Files navigation failed: " & errMsg)
 		try
@@ -725,12 +795,14 @@ on mmdGUIAttachOneFile(posixPath, winTitle)
 		if sheetGone then exit repeat
 	end repeat
 	if not sheetGone then
+		mmdStamp("escape because the sheet stayed open")
 		try
 			tell application "System Events" to key code 53
 		end try
 		mmdLog("Attach Files sheet still open after confirm")
 		return false
 	end if
+	mmdStamp("dialog closed")
 	return true
 end mmdGUIAttachOneFile
 
@@ -870,6 +942,33 @@ on mmdAttachmentDescriptions(winTitle)
 end mmdAttachmentDescriptions
 
 using terms from application "System Events"
+	on mmdClickTitledButton(el, wanted)
+		set theRole to ""
+		try
+			set theRole to role of el as text
+		end try
+		if theRole is "AXButton" then
+			try
+				set theTitle to (value of attribute "AXTitle" of el) as text
+				if theTitle is wanted then
+					click el
+					return true
+				end if
+			end try
+			return false
+		end if
+		-- The file list and sidebar are large. The confirm button is not inside them.
+		if theRole is "AXOutline" or theRole is "AXBrowser" or theRole is "AXRow" or theRole is "AXScrollBar" or theRole is "AXCell" then
+			return false
+		end if
+		try
+			repeat with k in UI elements of el
+				if my mmdClickTitledButton(k, wanted) then return true
+			end repeat
+		end try
+		return false
+	end mmdClickTitledButton
+
 	on mmdButtonsFrom(el)
 		set out to {}
 		set cr to ""
@@ -894,6 +993,15 @@ using terms from application "System Events"
 		return out
 	end mmdButtonsFrom
 end using terms from
+
+on mmdCountFileChips(chips, fileName)
+	set n to 0
+	repeat with c in chips
+		if mmdChipIsFile(c as text, fileName) then set n to n + 1
+	end repeat
+	return n
+end mmdCountFileChips
+
 
 on mmdChipIsFile(desc, fileName)
 	if fileName is "" then return false
@@ -1046,8 +1154,21 @@ on mmdLog(theText)
 end mmdLog
 
 
+-- Step log for attach diagnosis. Basename and counts only. No message body.
+on mmdStamp(theText)
+	set stamp to ""
+	try
+		set stamp to do shell script "date +%H:%M:%S"
+	end try
+	set mmdLogText to mmdLogText & stamp & " " & theText & return
+	try
+		do shell script "printf '%s %s\\n' " & quoted form of stamp & " " & quoted form of theText & " >> /tmp/mmd-steps.log"
+	end try
+end mmdStamp
+
+
 on mmdWriteLog()
-	-- Intentionally empty: a /tmp log leaked subjects and attach paths.
+	-- The step log is written by mmdStamp as each step finishes.
 end mmdWriteLog
 
 
@@ -1119,40 +1240,10 @@ on mmdFocusMessageBody(expectedTitle)
 					return "no compose window titled \"" & expectedTitle & "\" appeared"
 				end if
 
-				-- Prefer the real message body (AXWebArea). Subject+Tab can land on
-				-- an attachment chip once files are present, which made Cmd-V /
-				-- verification select dog-1.jpg instead of the body.
-				set bodyArea to missing value
-				try
-					repeat with e in (entire contents of theWindow)
-						try
-							if (role of e as text) is "AXWebArea" then
-								set d to ""
-								try
-									set d to description of e as text
-								end try
-								if d is "message body" then
-									set bodyArea to e
-									exit repeat
-								end if
-							end if
-						end try
-					end repeat
-				end try
-
-				if bodyArea is not missing value then
-					try
-						set focused of bodyArea to true
-					end try
-					delay 0.2
-					set bodyPos to position of bodyArea
-					-- Click near the top of the body (where reply caret / our paste belong).
-					click at {(item 1 of bodyPos) + 60, (item 2 of bodyPos) + 28}
-					delay 0.25
-					return "ok-web"
-				end if
-
-				-- Fallback: Subject field is last of the header fields; Tab once → body.
+				-- Do not click the message body. A click there leaves Mail in a state
+				-- where the next Attach Files dialog does not keep the files.
+				-- Subject is the last header field. Tab once moves into the body.
+				-- Call this before any file is attached, so Tab cannot land on a chip.
 				set subjectField to last text field of theWindow
 				set fieldValue to ((value of subjectField) as text)
 				if fieldValue is not expectedTitle then
