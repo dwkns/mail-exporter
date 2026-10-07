@@ -118,41 +118,42 @@ enum AppCommandServer {
         } else {
             return jsonLine(["ok": false, "error": "provide path or markdown"])
         }
-        do {
-            let result = try ComposeBridge.compose(markdownFiles: [fileURL])
-            var payload: [String: Any] = [
-                "ok": result.ok,
-                "summary": result.summary,
-                "detail": result.detail,
-                "via": "app",
-            ]
-            if let counts = AttachCountCheck.parse(result.detail) {
-                payload["attached"] = counts.attached
-                payload["requested"] = counts.requested
-                payload["result"] = "attached \(counts.attached) of \(counts.requested)"
-            } else if result.ok {
-                payload["result"] = result.summary
-            } else {
-                let failure = result.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-                payload["result"] = (failure.isEmpty || failure == "OK") ? "Compose failed" : failure
-            }
-            if result.ok == false, (payload["result"] as? String) == "OK" {
-                payload["result"] = "Compose failed"
-            }
-            DraftNotifier.announce(result, draftCount: 1)
-            return jsonLine(payload)
-        } catch {
-            let failed = ComposeResult(ok: false, summary: "Compose failed", detail: error.localizedDescription)
-            DraftNotifier.announce(failed, draftCount: 1)
-            return jsonLine(["ok": false, "error": error.localizedDescription])
-        }
+        let methodRaw = (obj["method"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let method = methodRaw.isEmpty ? "auto" : methodRaw
+        let subject = obj["subject"] as? String ?? ""
+        let payload = HiddenDraft.run(path: fileURL.path, subjectOverride: subject, method: method)
+        let ok = payload["ok"] as? Bool ?? false
+        let text = (payload["result"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let err = (payload["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = [text, err].filter { !$0.isEmpty }.joined(separator: " ")
+        let summary = text.isEmpty ? (ok ? "Draft ready" : "Compose failed") : text
+        DraftNotifier.announce(
+            ComposeResult(ok: ok, summary: summary, detail: detail),
+            draftCount: 1
+        )
+        return jsonLine(payload)
     }
 
     private static func jsonLine(_ obj: [String: Any]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: obj),
+        let boxed = jsonReady(obj)
+        guard let data = try? JSONSerialization.data(withJSONObject: boxed),
               let text = String(data: data, encoding: .utf8) else {
             return "{\"ok\":false,\"error\":\"request failed\"}"
         }
         return text
+    }
+
+    /// JSONSerialization rejects a nested Swift dictionary of Double.
+    private static func jsonReady(_ value: Any) -> Any {
+        if let doubles = value as? [String: Double] {
+            return doubles.mapValues { NSNumber(value: $0) }
+        }
+        if let dict = value as? [String: Any] {
+            return dict.mapValues { jsonReady($0) }
+        }
+        if let list = value as? [Any] {
+            return list.map { jsonReady($0) }
+        }
+        return value
     }
 }

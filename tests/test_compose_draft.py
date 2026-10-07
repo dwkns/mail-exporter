@@ -1,14 +1,13 @@
-"""compose_draft: AppleScript-only Mail draft composition."""
+"""compose_draft asks the app socket. It does not run AppleScript."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import sys
+from unittest.mock import patch
 
 import pytest
 
-from engine.compose_draft import applescript_path, compose_draft, compose_markdown_text
+from engine.compose_draft import compose_draft, compose_markdown_text
 
 
 @pytest.fixture
@@ -37,30 +36,23 @@ def test_missing_file() -> None:
     assert "not found" in result["error"]
 
 
-def test_compose_via_applescript_missing_script(draft_md: Path) -> None:
-    with patch("engine.compose_draft.applescript_path", return_value=None):
-        result = compose_draft(draft_md)
-    assert result["ok"] is False
-    assert result["via"] == "mail"
-    assert "not found" in result["error"]
-
-
-def test_compose_via_applescript_runs_osascript(draft_md: Path, tmp_path: Path) -> None:
-    script = tmp_path / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=0, stdout="attached 1 of 1\n", stderr="")
-    with (
-        patch("engine.compose_draft.applescript_path", return_value=script),
-        patch("engine.compose_draft.subprocess.run", return_value=proc) as run,
-    ):
-        result = compose_draft(draft_md)
-    run.assert_called_once()
-    args = run.call_args[0][0]
-    assert args[0] == "/usr/bin/osascript"
-    assert args[1] == str(script)
-    assert args[2] == str(draft_md)
+def test_asks_app_socket(draft_md: Path) -> None:
+    with patch("engine.compose_draft._ask_app") as ask:
+        ask.return_value = {
+            "ok": True,
+            "result": "attached 1 of 1",
+            "attached": 1,
+            "requested": 1,
+            "method": "upload",
+        }
+        result = compose_draft(draft_md, method="upload", subject="PROBE draft-creation")
+    ask.assert_called_once()
+    req = ask.call_args.args[0]
+    assert req["cmd"] == "compose"
+    assert req["path"] == str(draft_md)
+    assert req["method"] == "upload"
+    assert req["subject"] == "PROBE draft-creation"
     assert result["ok"] is True
-    assert result["via"] == "mail"
     assert result["attached"] == 1
     assert result["requested"] == 1
 
@@ -77,8 +69,9 @@ def test_rejects_absolute_attach_outside_project(tmp_path: Path) -> None:
         f"---\nTo: a@b.com\nSubject: x\nAttach: {secret}\n---\n\nhi\n",
         encoding="utf-8",
     )
-    with patch("engine.compose_draft.applescript_path", return_value=tmp_path / "x.applescript"):
+    with patch("engine.compose_draft._ask_app") as ask:
         result = compose_draft(md)
+    ask.assert_not_called()
     assert result["ok"] is False
     assert "project" in result["error"].lower()
 
@@ -96,95 +89,25 @@ def test_parent_relative_attach_escaping_project_is_rejected(tmp_path: Path) -> 
         "Attach: ../../../outside/scan.pdf\n---\n\nhi\n",
         encoding="utf-8",
     )
-    result = compose_draft(md)
+    with patch("engine.compose_draft._ask_app") as ask:
+        result = compose_draft(md)
+    ask.assert_not_called()
     assert result["ok"] is False
     assert "project" in result["error"].lower()
 
 
-def test_missing_attach_still_opens_mail_but_not_ok(tmp_path: Path) -> None:
+def test_missing_attach_fails_before_mail(tmp_path: Path) -> None:
     md = tmp_path / "d.md"
     md.write_text(
         "---\nTo: a@b.com\nSubject: x\nAttach: gone.pdf\n---\n\nhi\n",
         encoding="utf-8",
     )
-    script = tmp_path / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=2, stdout="", stderr="attached 0 of 1\n")
-    with (
-        patch("engine.compose_draft.applescript_path", return_value=script),
-        patch("engine.compose_draft.subprocess.run", return_value=proc) as run,
-    ):
+    with patch("engine.compose_draft._ask_app") as ask:
         result = compose_draft(md)
-    run.assert_called_once()
+    ask.assert_not_called()
     assert result["ok"] is False
-    assert result["attached"] == 0
-    assert result["requested"] == 1
-    assert "0 of 1" in result["error"]
-
-
-def test_silent_ok_with_requested_attach_is_refused(tmp_path: Path) -> None:
-    md = tmp_path / "d.md"
-    (tmp_path / "a.pdf").write_bytes(b"%PDF")
-    md.write_text(
-        "---\nTo: a@b.com\nSubject: x\nAttach: a.pdf\n---\n\nhi\n",
-        encoding="utf-8",
-    )
-    script = tmp_path / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=0, stdout="OK\n", stderr="")
-    with (
-        patch("engine.compose_draft.applescript_path", return_value=script),
-        patch("engine.compose_draft.subprocess.run", return_value=proc),
-    ):
-        result = compose_draft(md)
-    assert result["ok"] is False
-    assert result["requested"] == 1
-    assert "silent OK" in result["error"]
-
-
-def test_failure_result_is_not_ok_when_stdout_is_ok(tmp_path: Path) -> None:
-    md = tmp_path / "d.md"
-    (tmp_path / "a.pdf").write_bytes(b"%PDF")
-    md.write_text(
-        "---\nTo: a@b.com\nSubject: x\nAttach: a.pdf\n---\n\nhi\n",
-        encoding="utf-8",
-    )
-    script = tmp_path / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(
-        returncode=1,
-        stdout="OK\n",
-        stderr="execution error: The draft has 0. attached 0 of 1 (2)\n",
-    )
-    with (
-        patch("engine.compose_draft.applescript_path", return_value=script),
-        patch("engine.compose_draft.subprocess.run", return_value=proc),
-    ):
-        result = compose_draft(md)
-    assert result["ok"] is False
-    assert result["result"] == "attached 0 of 1"
-    assert result["result"] != "OK"
-
-
-def test_partial_attach_count_fails(tmp_path: Path) -> None:
-    md = tmp_path / "d.md"
-    (tmp_path / "a.pdf").write_bytes(b"%PDF")
-    (tmp_path / "b.pdf").write_bytes(b"%PDF")
-    md.write_text(
-        "---\nTo: a@b.com\nSubject: x\nAttach: a.pdf, b.pdf\n---\n\nhi\n",
-        encoding="utf-8",
-    )
-    script = tmp_path / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    proc = MagicMock(returncode=2, stdout="", stderr="attached 1 of 2\n")
-    with (
-        patch("engine.compose_draft.applescript_path", return_value=script),
-        patch("engine.compose_draft.subprocess.run", return_value=proc),
-    ):
-        result = compose_draft(md)
-    assert result["ok"] is False
-    assert result["attached"] == 1
-    assert result["requested"] == 2
+    assert "gone.pdf" in result["error"]
+    assert "not found" in result["error"]
 
 
 def test_parse_attach_counts() -> None:
@@ -214,20 +137,3 @@ def test_compose_markdown_text_persists_into_drafts(
     assert path_arg.suffix == ".md"
     assert path_arg.parent.name == "Drafts"
     assert path_arg.exists()
-
-
-def test_applescript_path_from_installed_engine_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    resources = tmp_path / "MailExporter.app" / "Contents" / "Resources"
-    engine_dir = resources / "MailExporterEngine"
-    engine_dir.mkdir(parents=True)
-    script = resources / "MakeMailDraft.applescript"
-    script.write_text("-- stub\n", encoding="utf-8")
-    exe = engine_dir / "MailExporterEngine"
-    exe.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(exe))
-    monkeypatch.setattr(
-        "engine.compose_draft.INSTALLED_APP_SCRIPT",
-        tmp_path / "not-installed.applescript",
-    )
-    assert applescript_path() == script

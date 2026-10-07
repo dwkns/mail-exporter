@@ -436,10 +436,6 @@ if [[ -f "${ROOT}/Resources/how_to_use.md" ]]; then
   cp "${ROOT}/Resources/how_to_use.md" "${HELPER_DIR}/how_to_use.md"
 fi
 
-if [[ -f "${ROOT}/Resources/MakeMailDraft.applescript" ]]; then
-  cp "${ROOT}/Resources/MakeMailDraft.applescript" "${HELPER_DIR}/MakeMailDraft.applescript"
-fi
-
 if [[ -f "${ROOT}/Resources/PutHTMLOnClipboard.js" ]]; then
   cp "${ROOT}/Resources/PutHTMLOnClipboard.js" "${HELPER_DIR}/PutHTMLOnClipboard.js"
 fi

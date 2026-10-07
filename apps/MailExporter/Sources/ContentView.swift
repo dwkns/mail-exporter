@@ -34,8 +34,7 @@ struct ContentView: View {
     }
 
     private func drainPendingDrafts() {
-        // Drain without forcing MailExporter front — MakeMailDraft activates Mail,
-        // and bringing this window forward afterward covers the new draft.
+        // Drain without forcing MailExporter front. Draft creation stays in the background.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             ComposeRunner.shared.drainInbox()
         }

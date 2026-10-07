@@ -467,9 +467,11 @@ def compose_draft(path: str = "", markdown: str = "") -> str:
     project root; a file next to the ``.md`` in ``Drafts/`` also works. List
     several with comma+space (``a.pdf, b.pdf``). Absolute paths are allowed
     only under the project; ``..`` / ``~/`` that escape it are refused.
-    After Mail opens the draft, the result includes ``attached`` vs
+    After the draft is in Mail, the result includes ``attached`` vs
     ``requested`` and is not OK if they differ.
-    Uses AppleScript (native reply quote; GUI Attach Files for reply+attachments).
+    Upload uses IMAP when the account is iCloud, the keychain item
+    ``MailExporter iCloud IMAP`` exists, and TLS succeeds within 3 seconds.
+    Otherwise the app imports a mailbox and moves the message into Drafts.
     """
     if path:
         md_path = Path(path).expanduser()

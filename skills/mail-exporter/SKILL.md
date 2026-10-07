@@ -55,4 +55,4 @@ After the owner sends, the next export can move matching Markdown from `Drafts/`
 
 ## Permissions
 
-Full Disk Access is only for MailExporter. Cursor and Claude do not need it. Accessibility is for rich paste. Automation → Mail is for drafts. MailExporter opens the draft.
+Full Disk Access is only for MailExporter. Cursor and Claude do not need it. Automation → Mail is for drafts. MailExporter creates the draft in the background. Upload uses IMAP when the account is iCloud, the keychain item `MailExporter iCloud IMAP` exists, and TLS succeeds within 3 seconds. Otherwise it imports a mailbox and moves the message into Drafts. Accessibility is not required for drafts.
