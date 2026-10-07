@@ -145,7 +145,7 @@ PYTHONPATH="$(pwd)" .venv/bin/python -m mailexporter_mcp
 | `read_message` | Read headers + body of one `.eml` |
 | `list_drafts` | Inventory `Drafts/` and `Sent/` Markdown |
 | `create_job` / `edit_job` | Set up or change an export |
-| `compose_draft` | Open a Mail draft from Markdown (AppleScript) |
+| `compose_draft` | Open a Mail draft from Markdown (IMAP upload, or mailbox import) |
 | `check_matches` | Dry-run: how many Mail messages currently match |
 | `export_job` | Refresh the folder from Apple Mail. Pass `job_name` (or `job_id`). Incremental unless `force_full` is true; both extras may be omitted. |
 | `clear_target` | Delete exported `.eml` files (debug / full redo) |
@@ -176,7 +176,9 @@ Examples: `001_supplier_inquiry.md`, `014_contractor_quote.md`.
 
 Keep the same filename when moving `Drafts/` → `Sent/`. Move (do not copy or delete) only when an exported `.eml` matches To / Subject / thread — the job must include Sent mail. If it is unclear, leave the file in `Drafts/`.
 
-Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space (`a.pdf, b.pdf`). After the draft opens, `compose_draft` reports attached vs requested and does not return a silent OK if they differ.
+Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space (`a.pdf, b.pdf`). After the draft is in Mail, `compose_draft` reports attached vs requested and does not return a silent OK if they differ.
+
+Upload writes the draft to iCloud Drafts over IMAP when the From account is iCloud, TLS to the mail server succeeds within 3 seconds, and the login keychain has `MailExporter iCloud IMAP` for that address. If the server is unreachable, the password item is missing, or the account is not iCloud, MailExporter imports a mailbox and moves the message into Drafts. Store the password with `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w`.
 
 ---
 

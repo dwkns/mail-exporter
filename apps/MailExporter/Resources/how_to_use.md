@@ -96,12 +96,13 @@ Dropping a PDF on the Export pane does **not** attach it — put it on `Attach:`
 
 | Situation | What happens |
 |-----------|----------------|
-| `In-Reply-To` + `Attach:` | AppleScript reply, then GUI Attach Files (quote preserved) |
-| `In-Reply-To` set, no attach | Threaded reply if Mail finds the message |
-| `In-Reply-To` set but not found | New draft |
-| No `In-Reply-To`, or `Reply: new` | New outgoing draft |
+| iCloud account, password stored, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP |
+| Server unreachable, no password, or the account is not iCloud | Import an Apple mailbox, then move the message into Drafts |
+| `In-Reply-To` and the original `.eml` is in `Email/` | The draft quotes that message |
+| `In-Reply-To` set, original `.eml` missing, and `Reply` is not `new` | The draft is not created |
+| No `In-Reply-To`, or `Reply: new` | New draft, with no quote |
 
-MailExporter needs **Accessibility** (formatted paste) and **Automation → Mail**. Without Accessibility, drafts still open as plain text.
+MailExporter needs **Automation → Mail**. It does not need Accessibility to create a draft. Upload reads the keychain item `MailExporter iCloud IMAP` for the From address. If that item is missing, MailExporter imports and reports `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w`.
 
 ## MailExporter MCP
 

@@ -1,156 +1,117 @@
-"""Compose Mail drafts via AppleScript (Make Mail Draft). Never sends."""
+"""Ask MailExporter.app to create a Mail draft. Never sends."""
 
 from __future__ import annotations
 
+import json
 import re
+import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 from engine.draft_md import parse_markdown_draft, resolve_attachments
 
 _ATTACHED_RE = re.compile(r"attached\s+(\d+)\s+of\s+(\d+)", re.I)
+_APP_SOCKET = Path.home() / "Library/Application Support/MailExporter/cmd.sock"
+_APP_BUNDLE = Path("/Applications/MailExporter.app")
 
 
 def parse_attach_counts(text: str) -> tuple[int, int] | None:
-    """Parse ``attached N of M`` from Make Mail Draft output."""
+    """Parse ``attached N of M`` from a draft result."""
     match = _ATTACHED_RE.search(text or "")
     if not match:
         return None
     return int(match.group(1)), int(match.group(2))
 
-INSTALLED_APP_SCRIPT = Path(
-    "/Applications/MailExporter.app/Contents/Resources/MakeMailDraft.applescript"
-)
-INSTALLED_ENGINE = Path(
-    "/Applications/MailExporter.app/Contents/Resources/MailExporterEngine/MailExporterEngine"
-)
 
+def _ask_app(req: dict) -> dict:
+    """Ask the MailExporter app. Same socket path and retry as the MCP tool."""
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    def once() -> dict:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(600)
+            sock.connect(str(_APP_SOCKET))
+            sock.sendall((json.dumps(req) + "\n").encode())
+            buf = b""
+            while b"\n" not in buf:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+        if not buf:
+            return {"ok": False, "error": "MailExporter returned nothing"}
+        payload = json.loads(buf.split(b"\n", 1)[0])
+        if not isinstance(payload, dict):
+            return {"ok": False, "error": "MailExporter returned a non-object"}
+        return payload
 
-
-def _frozen_script_candidates() -> list[Path]:
-    """AppleScript next to the bundled MailExporterEngine (installed .app)."""
-    found: list[Path] = []
-    if not getattr(sys, "frozen", False):
-        return found
-    exe = Path(sys.executable).resolve()
-    found.append(exe.parent.parent / "MakeMailDraft.applescript")
-    found.append(exe.parent / "MakeMailDraft.applescript")
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        base = Path(meipass)
-        found.append(base / "MakeMailDraft.applescript")
-        found.append(base.parent / "MakeMailDraft.applescript")
-    for parent in exe.parents:
-        if parent.name == "Resources":
-            found.append(parent / "MakeMailDraft.applescript")
-            break
-        if parent.suffix == ".app":
-            found.append(parent / "Contents/Resources/MakeMailDraft.applescript")
-            break
-    return found
-
-
-def applescript_path() -> Path | None:
-    candidates = [
-        *_frozen_script_candidates(),
-        INSTALLED_APP_SCRIPT,
-        _repo_root()
-        / "apps/MailExporter/MailExporter.app/Contents/Resources/MakeMailDraft.applescript",
-        _repo_root() / "apps/MailExporter/Resources/MakeMailDraft.applescript",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return path
-    return None
-
-
-def compose_via_applescript(md_path: Path) -> dict:
-    script = applescript_path()
-    if script is None:
-        return {"ok": False, "via": "mail", "error": "MakeMailDraft.applescript not found"}
-    # Reject paths outside the project before Mail (missing files still open).
-    requested = 0
-    resolved: list[Path] = []
     try:
-        text = md_path.read_text(encoding="utf-8")
-        spec = parse_markdown_draft(text, source_path=md_path)
-        requested = len(spec.attach)
-        if spec.attach:
-            resolved = resolve_attachments(spec)
-    except (OSError, ValueError) as exc:
-        return {"ok": False, "via": "mail", "error": str(exc), "path": str(md_path)}
+        return once()
+    except (FileNotFoundError, ConnectionRefusedError, OSError):
+        if _APP_BUNDLE.is_dir():
+            subprocess.run(["/usr/bin/open", "-a", str(_APP_BUNDLE)], check=False)
+        for _ in range(40):
+            time.sleep(0.25)
+            try:
+                return once()
+            except (FileNotFoundError, ConnectionRefusedError, OSError):
+                continue
+        return {
+            "ok": False,
+            "error": "MailExporter is not running, so it could not read your mail.",
+        }
 
-    proc = subprocess.run(
-        ["/usr/bin/osascript", str(script), str(md_path)],
-        capture_output=True,
-        text=True,
-    )
-    out = (proc.stdout or "").strip()
-    err = (proc.stderr or "").strip()
-    blob = f"{out}\n{err}".strip()
-    parsed = parse_attach_counts(blob)
-    attached = parsed[0] if parsed else None
-    if parsed:
-        requested = parsed[1]
-    mismatch = False
-    if requested:
-        if parsed:
-            mismatch = attached != requested
+
+def _missing_attachments(spec, resolved: list[Path]) -> list[str]:
+    """Names in Attach: that resolve_attachments skipped because the file is absent."""
+    from engine.project import infer_project_root
+
+    source = spec.source_path
+    md_dir = (source.parent if source else Path.cwd()).resolve()
+    project = infer_project_root(source).resolve() if source else md_dir
+    got = {path.resolve() for path in resolved}
+    missing: list[str] = []
+    for raw in spec.attach:
+        expanded = Path(raw).expanduser()
+        if expanded.is_absolute() or raw.startswith("~"):
+            candidates = [expanded.expanduser().resolve()]
         else:
-            # Old script returned silent OK and never reported counts.
-            mismatch = True
-    ok = proc.returncode == 0 and not mismatch
-    if parsed and attached is not None:
-        count_text = f"attached {attached} of {requested}"
-    elif requested:
-        count_text = f"attached unknown of {requested}"
-    else:
-        count_text = ""
-    if ok:
-        result_text = count_text or out or "OK"
-    elif count_text and parsed:
-        result_text = count_text
-    elif err:
-        result_text = err
-    elif out and out != "OK":
-        result_text = out
-    else:
-        result_text = count_text or "compose failed"
-    payload: dict = {
-        "ok": ok,
-        "via": "mail",
-        "path": str(md_path),
-        "result": result_text,
-        "stderr": err or None,
-        "exit": proc.returncode,
-        "attached": attached,
-        "requested": requested,
-        "resolved": [str(path) for path in resolved],
-    }
-    if mismatch:
-        if parsed:
-            payload["error"] = f"attached {attached} of {requested}"
-        else:
-            payload["error"] = (
-                f"attached unknown of {requested}; refused silent OK"
-            )
-            payload["result"] = payload["error"]
-    if not ok and payload["result"] == "OK":
-        payload["result"] = payload.get("error") or err or "compose failed"
-    return payload
+            candidates = [(project / expanded).resolve(), (md_dir / expanded).resolve()]
+        if not any(path in got and path.is_file() for path in candidates):
+            missing.append(raw)
+    return missing
 
 
-def compose_draft(md_path: Path, **_kwargs) -> dict:
-    """Open a Mail draft from a Markdown file. Extra kwargs ignored (compat)."""
+def compose_draft(md_path: Path, **kwargs) -> dict:
+    """Open a Mail draft from a Markdown file. Extra kwargs may set method or subject."""
     md_path = md_path.expanduser().resolve()
     if not md_path.is_file():
         return {"ok": False, "error": f"file not found: {md_path}"}
-    return compose_via_applescript(md_path)
+    try:
+        text = md_path.read_text(encoding="utf-8")
+        spec = parse_markdown_draft(text, source_path=md_path)
+        if spec.attach:
+            resolved = resolve_attachments(spec)
+            missing = _missing_attachments(spec, resolved)
+            if missing:
+                return {
+                    "ok": False,
+                    "error": "attachment not found: " + ", ".join(missing),
+                    "path": str(md_path),
+                }
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "path": str(md_path)}
+
+    req: dict = {"cmd": "compose", "path": str(md_path)}
+    method = kwargs.get("method")
+    subject = kwargs.get("subject")
+    if method:
+        req["method"] = method
+    if subject:
+        req["subject"] = subject
+    payload = _ask_app(req)
+    payload.setdefault("path", str(md_path))
+    return payload
 
 
 def compose_markdown_text(markdown: str, **kwargs) -> dict:
