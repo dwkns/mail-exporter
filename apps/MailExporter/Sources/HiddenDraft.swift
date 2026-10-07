@@ -1005,6 +1005,7 @@ private final class IMAP {
     private var buffer = Data()
     private let lock = NSLock()
     var last = ""
+    private var sendNote = ""
 
     func connect(timeout: TimeInterval) -> Bool {
         let tls = NWProtocolTLS.Options()
@@ -1025,9 +1026,9 @@ private final class IMAP {
             }
         }
         c.start(queue: queue)
-        receive()
         _ = ready.wait(timeout: .now() + timeout)
         guard box.value else { return false }
+        receive()
         let greet = readNew(from: 0, timeout: 3) { $0.contains("* OK") || $0.contains(" OK") }
         return greet.contains("OK")
     }
@@ -1048,10 +1049,15 @@ private final class IMAP {
     }
 
     func appendDraft(_ mime: Data) -> Int? {
-        let ask = command("A2 APPEND Drafts (\\Seen \\Draft) {\(mime.count)}", timeout: 15)
-        guard ask.contains("+") else { last = ask; return nil }
+        let line = "A2 APPEND Drafts (\\Seen \\Draft) {\(mime.count)}"
+        let ask = command(line, timeout: 15)
+        guard ask.contains("+") else {
+            last = ask.isEmpty ? "no continuation \(sendNote)" : ask
+            return nil
+        }
         let start = bufferedCount()
         sendRaw(mime)
+        sendRaw(Data("\r\n".utf8))
         let reply = readNew(from: start, timeout: 20) { $0.contains("A2 OK") || $0.contains("A2 NO") || $0.contains("A2 BAD") }
         last = reply
         guard reply.contains("A2 OK") else { return nil }
@@ -1083,7 +1089,10 @@ private final class IMAP {
 
     private func sendRaw(_ data: Data) {
         let sem = DispatchSemaphore(value: 0)
-        conn?.send(content: data, completion: .contentProcessed { _ in sem.signal() })
+        conn?.send(content: data, completion: .contentProcessed { error in
+            if let error { self.sendNote = String(describing: error) }
+            sem.signal()
+        })
         _ = sem.wait(timeout: .now() + 10)
     }
 
