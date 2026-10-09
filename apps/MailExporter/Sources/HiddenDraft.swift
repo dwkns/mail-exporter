@@ -34,6 +34,8 @@ enum HiddenDraft {
         var wantsBold: Bool
         var wantsList: Bool
         var fromAddress: String
+        /// True when Markdown was turned into HTML.
+        var renderedHTML: Bool
     }
 
     /// Socket and drop-zone entry. `method` is upload, import, or auto.
@@ -109,6 +111,7 @@ enum HiddenDraft {
         }
         payload["requested"] = built.requested
         payload["subject"] = built.subject
+        payload["formatting"] = built.renderedHTML
         var seconds: [String: Double] = ["build": elapsed(tBuild)]
 
         var setupLine = ""
@@ -323,7 +326,9 @@ enum HiddenDraft {
             throw failure("No exported .eml in Email/ matches In-Reply-To. Refusing to invent a quote.")
         }
         let quote = original.map { quoteBlock($0) } ?? Quote(html: "", plain: "", references: [], from: "", date: "")
-        let bodyHTML = spec.format == "plain" ? plainHTML(spec.body) : mdToHTML(spec.body)
+        let markdown = spec.format != "plain"
+        let bodyHTML = markdown ? mdToHTML(spec.body) : plainHTML(spec.body)
+        let renderedHTML = markdown && bodyHTML.contains("<")
         let cids = files.map { _ in UUID().uuidString.uppercased() }
         let chips = cids.map {
             "<span class=\"Apple-string-attachment\"><object type=\"application/x-apple-msg-attachment\" width=\"100\" data=\"cid:\($0)\"></object></span>"
@@ -380,9 +385,18 @@ enum HiddenDraft {
             plainBody: spec.body,
             bodyNeedle: needle,
             quoteNeedle: quote.needle,
-            wantsBold: spec.format != "plain" && spec.body.contains("**"),
-            wantsList: spec.format != "plain" && (spec.body.contains("\n- ") || spec.body.hasPrefix("- ") || spec.body.contains("\n* ")),
-            fromAddress: bareAddress(spec.from)
+            wantsBold: markdown && spec.body.contains("**"),
+            wantsList: renderedHTML && spec.body.components(separatedBy: "\n").contains { line in
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if t.hasPrefix("- ") || t.hasPrefix("* ") { return true }
+                guard let dot = t.firstIndex(of: ".") else { return false }
+                let head = t[..<dot]
+                guard !head.isEmpty, head.allSatisfy(\.isNumber) else { return false }
+                let after = t.index(after: dot)
+                return after < t.endIndex && t[after] == " "
+            },
+            fromAddress: bareAddress(spec.from),
+            renderedHTML: renderedHTML
         )
     }
 
@@ -515,27 +529,58 @@ enum HiddenDraft {
         let lines = md.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var blocks: [String] = []
         var i = 0
-        while i < lines.count {
-            if lines[i].trimmingCharacters(in: .whitespaces).isEmpty { i += 1; continue }
-            if lines[i].range(of: #"^\s*[-*]\s+"#, options: .regularExpression) != nil {
-                var items: [String] = []
-                while i < lines.count, lines[i].range(of: #"^\s*[-*]\s+"#, options: .regularExpression) != nil {
-                    let item = lines[i].replacingOccurrences(of: #"^\s*[-*]\s+"#, with: "", options: .regularExpression)
-                    items.append("<li>" + inlineRE(item.trimmingCharacters(in: .whitespaces)) + "</li>")
-                    i += 1
+        func blank(_ line: String) -> Bool {
+            line.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        func isList(_ line: String, _ pattern: String) -> Bool {
+            line.range(of: pattern, options: .regularExpression) != nil
+        }
+        let bullet = #"^\s*[-*]\s+"#
+        let number = #"^\s*\d+\.\s+"#
+        func collect(_ pattern: String, _ tag: String) {
+            var items: [String] = []
+            while i < lines.count {
+                if blank(lines[i]) {
+                    var j = i + 1
+                    while j < lines.count && blank(lines[j]) { j += 1 }
+                    if j < lines.count && isList(lines[j], pattern) {
+                        i = j
+                        continue
+                    }
+                    break
                 }
-                blocks.append("<ul>" + items.joined() + "</ul>")
+                if !isList(lines[i], pattern) { break }
+                let item = lines[i].replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+                items.append("<li>" + inlineRE(item.trimmingCharacters(in: .whitespaces)) + "</li>")
+                i += 1
+            }
+            blocks.append("<" + tag + ">" + items.joined() + "</" + tag + ">")
+        }
+        while i < lines.count {
+            if blank(lines[i]) { i += 1; continue }
+            if isList(lines[i], bullet) {
+                collect(bullet, "ul")
+                continue
+            }
+            if isList(lines[i], number) {
+                collect(number, "ol")
                 continue
             }
             var para: [String] = []
-            while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).isEmpty,
-                  lines[i].range(of: #"^\s*[-*]\s+"#, options: .regularExpression) == nil {
+            while i < lines.count, !blank(lines[i]), !isList(lines[i], bullet), !isList(lines[i], number) {
                 para.append(lines[i].trimmingCharacters(in: .whitespaces))
                 i += 1
             }
             blocks.append("<div>" + para.map(inlineRE).joined(separator: "<br>") + "</div>")
         }
-        return blocks.joined(separator: "<div><br></div>")
+        var html = ""
+        for (index, block) in blocks.enumerated() {
+            if index > 0 && !block.hasPrefix("<ul>") && !block.hasPrefix("<ol>") {
+                html += "<div><br></div>"
+            }
+            html += block
+        }
+        return html
     }
 
     static func bodyNeedle(_ body: String) -> String {
@@ -947,7 +992,7 @@ enum HiddenDraft {
         read.hasQuote = fields["hasQuote"] == "true"
         read.rawStars = fields["rawStars"] == "true"
         read.hasBold = fields["srcB"] == "true"
-        read.hasList = fields["srcUL"] == "true"
+        read.hasList = fields["srcUL"] == "true" || fields["srcOL"] == "true"
         read.inReply = fields["inReplyTo"] == "1"
         return read
     }
@@ -978,13 +1023,14 @@ enum HiddenDraft {
             set hdrs to all headers of d
             set irt to "0"
             if hdrs contains "In-Reply-To:" and hdrs contains "\(esc(built.inReplyTo))" then set irt to "1"
-            return "attachments=" & (count of mail attachments of d) & linefeed & "names=" & names & linefeed & "cids=" & cids & linefeed & "hasBody=" & (c contains "\(esc(built.bodyNeedle))") & linefeed & "hasQuote=" & (c contains "\(esc(quote))") & linefeed & "rawStars=" & (c contains "**") & linefeed & "srcUL=" & (src contains "<ul>") & linefeed & "srcB=" & (src contains "<b>") & linefeed & "to=" & (address of every to recipient of d as text) & linefeed & "cc=" & (address of every cc recipient of d as text) & linefeed & "subject=" & (subject of d) & linefeed & "inReplyTo=" & irt & linefeed & "rowid=" & (id of d)
+            return "attachments=" & (count of mail attachments of d) & linefeed & "names=" & names & linefeed & "cids=" & cids & linefeed & "hasBody=" & (c contains "\(esc(built.bodyNeedle))") & linefeed & "hasQuote=" & (c contains "\(esc(quote))") & linefeed & "rawStars=" & (c contains "**") & linefeed & "srcUL=" & (src contains "<ul>") & linefeed & "srcOL=" & (src contains "<ol>") & linefeed & "srcB=" & (src contains "<b>") & linefeed & "to=" & (address of every to recipient of d as text) & linefeed & "cc=" & (address of every cc recipient of d as text) & linefeed & "subject=" & (subject of d) & linefeed & "inReplyTo=" & irt & linefeed & "rowid=" & (id of d)
         end tell
         """
     }
 
     static func verifyFields(_ read: ReadBack, built: Built, leftover: String) -> [String: Any] {
-        let formatting = !read.rawStars && (!built.wantsBold || read.hasBold) && (!built.wantsList || read.hasList)
+        let formatting = built.renderedHTML
+        let preserved = !read.rawStars && (!built.wantsBold || read.hasBold) && (!built.wantsList || read.hasList)
         let quoteOK = built.quoteNeedle.isEmpty ? true : read.hasQuote
         let countOK = read.attached == built.requested && read.cids == built.requested
         let needsReply = built.replyMode == "reply" || built.replyMode == "reply-all"
@@ -998,7 +1044,7 @@ enum HiddenDraft {
         if read.found && read.rawStars { warnings.append("raw markdown remains") }
         if read.found && needsReply && !read.inReply { warnings.append("In-Reply-To missing") }
         if read.found && !quoteOK { warnings.append("quote missing") }
-        if read.found && !formatting { warnings.append("formatting missing") }
+        if read.found && formatting && !preserved { warnings.append("formatting missing") }
         return [
             "ok": ok,
             "result": result,
@@ -1029,6 +1075,7 @@ enum HiddenDraft {
                 "requested": built.requested,
                 "subject": built.subject,
                 "inReplyToPresent": false,
+                "formatting": built.renderedHTML,
                 "warnings": warnings,
                 "error": "",
             ]
@@ -1055,6 +1102,7 @@ enum HiddenDraft {
             "requested": built.requested,
             "subject": subject,
             "inReplyToPresent": present || !needsReply,
+            "formatting": built.renderedHTML,
             "warnings": warnings,
             "error": countOK ? "" : "attachment count does not match",
         ]
