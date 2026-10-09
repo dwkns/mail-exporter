@@ -218,11 +218,14 @@ def test_promote_drafts_to_sent(tmp_path: Path, monkeypatch) -> None:
     drafts.mkdir(parents=True)
     md = drafts / "001_client_quote-follow-up.md"
     md.write_text(
-        "---\nTo: a@b.com\nSubject: Quote follow-up\nMessage-ID: <sent@x>\n---\n\nHi\n",
+        "---\nTo: you@example.com\nSubject: Quote follow-up\n---\n\nHi\n",
         encoding="utf-8",
     )
     result = run_job(job)
     assert result["draftsPromoted"] == 1
+    match = result["draftsPromotedMatches"][0]
+    assert match["draft"] == md.name
+    assert (Path(job.output_dir) / match["eml"]).is_file()
     assert not md.exists()
     assert (Path(job.output_dir) / "Sent" / md.name).is_file()
 
@@ -250,7 +253,35 @@ def test_inbox_reply_does_not_move_draft(tmp_path: Path, monkeypatch) -> None:
     assert not (Path(job.output_dir) / "Sent" / md.name).exists()
 
 
-def test_sent_subject_and_date_moves_draft(tmp_path: Path, monkeypatch) -> None:
+def test_sent_subject_to_and_reply_moves_draft(tmp_path: Path, monkeypatch) -> None:
+    mail = tmp_path / "mail" / "Sent Messages.mbox"
+    p1 = _write_emlx(
+        mail,
+        "1.emlx",
+        _rfc822(
+            mid="<new-sent@x>",
+            subject="Re: Quote follow-up",
+            body="invoice sent",
+            in_reply_to="<inbox@x>",
+        ),
+    )
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [p1])
+    job = _job(tmp_path)
+    drafts = Path(job.output_dir) / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "001_client_quote-follow-up.md"
+    md.write_text(
+        "---\nTo: you@example.com\nSubject: Fwd: Quote follow-up\n"
+        "In-Reply-To: <inbox@x>\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    result = run_job(job)
+    assert result["draftsPromoted"] == 1
+    assert result["draftsPromotedMatches"][0]["eml"].endswith(".eml")
+    assert (Path(job.output_dir) / "Sent" / md.name).is_file()
+
+
+def test_subject_and_date_alone_do_not_move_draft(tmp_path: Path, monkeypatch) -> None:
     mail = tmp_path / "mail" / "Sent Messages.mbox"
     p1 = _write_emlx(
         mail,
@@ -269,8 +300,8 @@ def test_sent_subject_and_date_moves_draft(tmp_path: Path, monkeypatch) -> None:
         encoding="utf-8",
     )
     result = run_job(job)
-    assert result["draftsPromoted"] == 1
-    assert (Path(job.output_dir) / "Sent" / md.name).is_file()
+    assert result["draftsPromoted"] == 0
+    assert md.is_file()
 
 
 def test_sent_subject_without_date_does_not_move_draft(tmp_path: Path, monkeypatch) -> None:
@@ -291,6 +322,24 @@ def test_sent_subject_without_date_does_not_move_draft(tmp_path: Path, monkeypat
     )
     result = run_job(job)
     assert result["draftsPromoted"] == 0
+    assert md.is_file()
+
+
+def test_promote_skips_when_sent_eml_is_missing(tmp_path: Path) -> None:
+    from engine.export import promote_drafts_to_sent
+
+    out = tmp_path / "out"
+    drafts = out / "Drafts"
+    drafts.mkdir(parents=True)
+    md = drafts / "001.md"
+    md.write_text(
+        "---\nTo: you@example.com\nSubject: Quote follow-up\n---\n\nHi\n",
+        encoding="utf-8",
+    )
+    raw = _rfc822(mid="<sent@x>", subject="Quote follow-up", body="invoice sent")
+    mail = tmp_path / "Sent Messages.mbox" / "1.emlx"
+    moved = promote_drafts_to_sent(out, [(mail, raw, 0)], {"<sent@x>": "not-written-yet.eml"})
+    assert moved == []
     assert md.is_file()
 
 
