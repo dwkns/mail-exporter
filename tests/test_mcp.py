@@ -95,6 +95,9 @@ def test_mcp_reads_folder_when_another_job_match_is_invalid(
     drafts = json.loads(m.list_drafts(job_name="Bad"))
     assert drafts["job"] == "Bad"
     assert drafts["drafts"] == []
+    body = json.loads(m.read_message(job_name="Bad", filename="2026-01-01_000000_hi_abc.eml"))
+    assert body["subject"] == "Hi"
+    assert "error" not in body
 
 
 def test_mcp_compose_draft_routes(tmp_path: Path) -> None:

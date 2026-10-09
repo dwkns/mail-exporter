@@ -11,7 +11,6 @@ from pathlib import Path
 from .criteria import decode_mime_header, header_value, match_message, spec_needs_body
 from .discover import candidate_paths
 from .jobs import Job
-from email.utils import parsedate_to_datetime
 
 from .mailio import (
     SKIP_PATH_PARTS_SENT,
@@ -348,71 +347,84 @@ def _norm_subject(subject: str) -> str:
     return text
 
 
-def _message_day(raw: str):
-    raw = (raw or "").strip()
-    if not raw:
-        return None
-    try:
-        return parsedate_to_datetime(raw).date()
-    except (TypeError, ValueError, IndexError, OverflowError):
-        return None
-
-
-def _id_token(raw: str) -> str:
-    return raw.strip().strip("<>").lower()
-
-
 def _is_sent_source(path: Path) -> bool:
     text = path.as_posix()
     return any(part in text for part in SKIP_PATH_PARTS_SENT)
 
 
-def promote_drafts_to_sent(output_dir: Path, matches: list[tuple[Path, bytes, int]]) -> int:
-    """Move a draft only when a sent message matches it.
+def _bare_addrs(value: str) -> set[str]:
+    return {item.lower() for item in re.findall(r"[\w.+-]+@[\w.-]+", value or "")}
 
-    An inbox Message-ID in In-Reply-To is not a sent copy. A subject inside
-    the filename is not enough. Match the draft's own Message-ID to a sent
-    message, or match subject and date.
+
+def _irt_tokens(value: str) -> set[str]:
+    text = (value or "").strip()
+    if not text:
+        return set()
+    found = re.findall(r"<[^>]+>", text)
+    if found:
+        return {item.strip("<>").lower() for item in found}
+    return {text.strip("<>").lower()}
+
+
+def promote_drafts_to_sent(
+    output_dir: Path,
+    matches: list[tuple[Path, bytes, int]],
+    files: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Move a draft only when a sent .eml is already in the export folder.
+
+    Match Subject with Re: and Fwd: removed, the To addresses, and
+    In-Reply-To. A Mail message that has not been written yet does not count.
     """
     drafts = output_dir / "Drafts"
     sent = output_dir / "Sent"
     if not drafts.is_dir():
-        return 0
+        return []
     sent.mkdir(exist_ok=True)
-    sent_msgs: list[tuple[str, str, object]] = []
+    names = files or {}
+    sent_files: list[tuple[Path, bytes]] = []
     for path, raw, _ in matches:
         if not _is_sent_source(path):
             continue
-        mid = header_value(raw, "Message-ID") or header_value(raw, "Message-Id") or ""
-        subj = _norm_subject(decode_mime_header(header_value(raw, "Subject")))
-        day = _message_day(header_value(raw, "Date"))
-        sent_msgs.append((_id_token(mid), subj, day))
-    moved = 0
+        sid = message_stable_id(raw, path)
+        name = names.get(sid)
+        if not name:
+            continue
+        eml = output_dir / name
+        if not eml.is_file():
+            continue
+        try:
+            sent_files.append((eml, eml.read_bytes()))
+        except OSError:
+            continue
+    moved: list[dict[str, str]] = []
     for md in list(drafts.glob("*.md")):
         try:
             text = md.read_text(encoding="utf-8")
         except OSError:
             continue
         fields = _front_matter(text)
-        own_id = _id_token(fields.get("message-id", ""))
         draft_subject = _norm_subject(fields.get("subject", ""))
-        draft_day = _message_day(fields.get("date", ""))
-        hit = False
-        for mid, subj, day in sent_msgs:
-            if own_id and mid and own_id == mid:
-                hit = True
+        draft_to = _bare_addrs(fields.get("to", ""))
+        draft_irt = _irt_tokens(fields.get("in-reply-to", ""))
+        if not draft_subject:
+            continue
+        hit: Path | None = None
+        for eml, raw in sent_files:
+            subj = _norm_subject(decode_mime_header(header_value(raw, "Subject")))
+            to = _bare_addrs(decode_mime_header(header_value(raw, "To") or ""))
+            irt = _irt_tokens(header_value(raw, "In-Reply-To") or "")
+            if subj == draft_subject and to == draft_to and irt == draft_irt:
+                hit = eml
                 break
-            if draft_subject and draft_day and subj == draft_subject and day == draft_day:
-                hit = True
-                break
-        if not hit:
+        if hit is None:
             continue
         dest = sent / md.name
         try:
             md.replace(dest)
-            moved += 1
         except OSError:
             continue
+        moved.append({"draft": md.name, "eml": hit.name})
     return moved
 
 
@@ -532,7 +544,7 @@ def run_job(
         attachments_filled += filled
         sidecar_written += write_attachments_sidecar(output_dir, sid, path)
 
-    promoted = promote_drafts_to_sent(output_dir, matches)
+    promoted = promote_drafts_to_sent(output_dir, matches, files)
     folder_count = len(list(output_dir.glob("*.eml")))
     state = {
         "ids": sorted(files),
@@ -559,7 +571,8 @@ def run_job(
         "attachmentsFilled": attachments_filled,
         "attachmentsSidecar": sidecar_written,
         "orphansRemoved": orphans,
-        "draftsPromoted": promoted,
+        "draftsPromoted": len(promoted),
+        "draftsPromotedMatches": promoted,
         "folderCount": folder_count,
         "countMatch": count_ok,
         "errors": errors,

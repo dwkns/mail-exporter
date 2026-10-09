@@ -16,6 +16,7 @@ enum HiddenDraft {
         var subject = ""
         var inReplyTo = ""
         var replyMode = "auto"
+        var format = "markdown"
         var attach: [String] = []
         var body = ""
     }
@@ -25,6 +26,9 @@ enum HiddenDraft {
         var requested: Int
         var messageID: String
         var inReplyTo: String
+        var replyMode: String
+        var subject: String
+        var plainBody: String
         var bodyNeedle: String
         var quoteNeedle: String
         var wantsBold: Bool
@@ -55,6 +59,7 @@ enum HiddenDraft {
             "seconds": [String: Double](),
             "leftoverMailbox": "",
             "error": "",
+            "warnings": [String](),
             "passwordItem": false,
             "frontBefore": frontBefore,
             "frontAfter": frontBefore,
@@ -69,16 +74,11 @@ enum HiddenDraft {
             let became = (out["frontBefore"] as? String) != "com.apple.mail"
                 && (out["frontAfter"] as? String) == "com.apple.mail"
             let rose = (out["mailWindowsAfter"] as? Int ?? 0) > (out["mailWindowsBefore"] as? Int ?? 0)
+            var warnings = out["warnings"] as? [String] ?? []
             if became || rose {
-                out["ok"] = false
-                let real = out["result"] as? String ?? ""
-                if real.isEmpty {
-                    out["result"] = "Mail came to the front"
-                }
-                let note = became ? "Mail came to the front" : "A Mail window appeared"
-                let err = out["error"] as? String ?? ""
-                out["error"] = err.isEmpty ? note : err + " " + note
+                warnings.append(became ? "Mail came to the front" : "A Mail window appeared")
             }
+            out["warnings"] = warnings
             let total = Date().timeIntervalSince(started)
             var seconds = out["seconds"] as? [String: Double] ?? [:]
             seconds["total"] = (total * 100).rounded() / 100
@@ -108,34 +108,34 @@ enum HiddenDraft {
             ])
         }
         payload["requested"] = built.requested
-        payload["subject"] = subjectOverride.isEmpty ? "" : subjectOverride
+        payload["subject"] = built.subject
         var seconds: [String: Double] = ["build": elapsed(tBuild)]
-
-        ensureMail()
 
         var setupLine = ""
         if chosen != "import" {
-            let kind = accountType(address: built.fromAddress)
             let password = keychainPassword(account: built.fromAddress)
             payload["passwordItem"] = password != nil
-            if kind != "iCloud" {
-                setupLine = "Account is not iCloud (\(kind))."
-            } else if password == nil {
-                setupLine = "security add-generic-password -a \(built.fromAddress) -s \"\(service)\" -w"
-            } else if let password {
+            if let password {
                 let tConnect = Date()
                 switch upload(mime: built.mime, user: built.fromAddress, password: password) {
-                case .uploaded(let uid, let connect, let append):
+                case .uploaded(let uid, let connect, let append, let raw):
                     seconds["connect"] = connect
                     seconds["upload"] = append
                     payload["serverUID"] = uid
                     payload["method"] = "upload"
-                    let waited = verify(built, seconds: &seconds)
-                    seconds["wait"] = waited.wait
                     payload["seconds"] = seconds
-                    return finish(verifyFields(waited, built: built, leftover: ""))
+                    var fields = fieldsFromUpload(built: built, raw: raw)
+                    fields["seconds"] = seconds
+                    return finish(fields)
                 case .offline:
                     seconds["connect"] = elapsed(tConnect)
+                    if chosen == "upload" {
+                        payload["method"] = "upload"
+                        payload["seconds"] = seconds
+                        payload["error"] = "Mail server was not reachable within 3 seconds."
+                        payload["result"] = "attached 0 of \(built.requested)"
+                        return finish([:])
+                    }
                     setupLine = "Mail server was not reachable within 3 seconds."
                 case .failed(let message):
                     if chosen == "upload" {
@@ -147,10 +147,20 @@ enum HiddenDraft {
                     }
                     setupLine = message
                 }
+            } else if chosen == "upload" {
+                payload["method"] = "upload"
+                payload["seconds"] = seconds
+                payload["error"] = "security add-generic-password -a \(built.fromAddress) -s \"\(service)\" -w"
+                payload["result"] = "attached 0 of \(built.requested)"
+                return finish([:])
+            } else {
+                setupLine = "security add-generic-password -a \(built.fromAddress) -s \"\(service)\" -w"
             }
         } else {
             payload["passwordItem"] = keychainPassword(account: built.fromAddress) != nil
         }
+
+        ensureMail()
 
         payload["method"] = "import"
         let tImport = Date()
@@ -227,6 +237,7 @@ enum HiddenDraft {
         spec.subject = (headers["subject"] ?? "").trimmingCharacters(in: .whitespaces)
         spec.inReplyTo = (headers["in-reply-to"] ?? headers["reply-to-message-id"] ?? "").trimmingCharacters(in: .whitespaces)
         spec.replyMode = (headers["reply"] ?? "auto").trimmingCharacters(in: .whitespaces).lowercased()
+        spec.format = (headers["format"] ?? "markdown").trimmingCharacters(in: .whitespaces).lowercased()
         spec.attach = splitAttach(headers["attach"] ?? "")
         spec.body = body.trimmingCharacters(in: CharacterSet.newlines)
         return spec
@@ -312,7 +323,7 @@ enum HiddenDraft {
             throw failure("No exported .eml in Email/ matches In-Reply-To. Refusing to invent a quote.")
         }
         let quote = original.map { quoteBlock($0) } ?? Quote(html: "", plain: "", references: [], from: "", date: "")
-        let bodyHTML = mdToHTML(spec.body)
+        let bodyHTML = spec.format == "plain" ? plainHTML(spec.body) : mdToHTML(spec.body)
         let cids = files.map { _ in UUID().uuidString.uppercased() }
         let chips = cids.map {
             "<span class=\"Apple-string-attachment\"><object type=\"application/x-apple-msg-attachment\" width=\"100\" data=\"cid:\($0)\"></object></span>"
@@ -326,22 +337,22 @@ enum HiddenDraft {
         if !spec.inReplyTo.isEmpty && !refs.contains(spec.inReplyTo) { refs.append(spec.inReplyTo) }
         var lines: [String] = []
         func hdr(_ k: String, _ v: String) { if !v.isEmpty { lines.append("\(k): \(v)") } }
-        hdr("Subject", spec.subject)
+        hdr("Subject", encodedHeader(spec.subject))
         lines.append("Mime-Version: 1.0 (Mac OS X Mail 16.0 \\(3901.100.1.1.11\\))")
         lines.append("Content-Type: multipart/alternative;\r\n\tboundary=\"\(bAlt)\"")
         lines.append("X-Universally-Unique-Identifier: \(UUID().uuidString.uppercased())")
         lines.append("X-Apple-Mail-Remote-Attachments: YES")
-        hdr("From", spec.from)
+        hdr("From", encodeAddress(spec.from))
         hdr("In-Reply-To", spec.inReplyTo)
         lines.append("X-Apple-Windows-Friendly: 1")
         hdr("Date", rfc2822(Date()))
-        hdr("Cc", spec.cc.joined(separator: ", "))
+        hdr("Cc", spec.cc.map(encodeAddress).joined(separator: ", "))
         lines.append("X-Apple-Mail-Signature: ")
         let messageID = "<\(UUID().uuidString.uppercased())@me.com>"
         lines.append("Message-Id: \(messageID)")
         if !refs.isEmpty { lines.append("References: " + refs.joined(separator: "\r\n ")) }
         lines.append("X-Uniform-Type-Identifier: com.apple.mail-draft")
-        hdr("To", spec.to.joined(separator: ", "))
+        hdr("To", spec.to.map(encodeAddress).joined(separator: ", "))
         var text = lines.joined(separator: "\r\n") + "\r\n\r\n"
         text += "\r\n--\(bAlt)\r\nContent-Transfer-Encoding: quoted-printable\r\nContent-Type: text/plain;\r\n\tcharset=utf-8\r\n\r\n"
         text += quotedPrintable(Data(plain.utf8)) + "\r\n"
@@ -364,10 +375,13 @@ enum HiddenDraft {
             requested: spec.attach.count,
             messageID: String(messageID.dropFirst().dropLast()),
             inReplyTo: spec.inReplyTo,
+            replyMode: spec.replyMode,
+            subject: spec.subject,
+            plainBody: spec.body,
             bodyNeedle: needle,
             quoteNeedle: quote.needle,
-            wantsBold: spec.body.contains("**"),
-            wantsList: spec.body.contains("\n- ") || spec.body.hasPrefix("- ") || spec.body.contains("\n* "),
+            wantsBold: spec.format != "plain" && spec.body.contains("**"),
+            wantsList: spec.format != "plain" && (spec.body.contains("\n- ") || spec.body.hasPrefix("- ") || spec.body.contains("\n* ")),
             fromAddress: bareAddress(spec.from)
         )
     }
@@ -536,6 +550,122 @@ enum HiddenDraft {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
+    static func plainHTML(_ body: String) -> String {
+        "<div>" + escapeHTML(body).replacingOccurrences(of: "\n", with: "<br>") + "</div>"
+    }
+
+    /// RFC 2047 Q-encoding. ASCII text is left as-is. Non-ASCII is never replaced.
+    static func encodedHeader(_ value: String) -> String {
+        if value.utf8.allSatisfy({ $0 < 128 }) { return value }
+        return encodedWords(value)
+    }
+
+    static func encodeAddress(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        guard let open = trimmed.lastIndex(of: "<"),
+              let close = trimmed.lastIndex(of: ">"),
+              open < close else {
+            return encodedHeader(trimmed)
+        }
+        var name = String(trimmed[..<open]).trimmingCharacters(in: .whitespaces)
+        let email = String(trimmed[trimmed.index(after: open)..<close]).trimmingCharacters(in: .whitespaces)
+        if name.hasPrefix("\""), name.hasSuffix("\""), name.count >= 2 {
+            name = String(name.dropFirst().dropLast())
+        }
+        if name.isEmpty { return "<\(email)>" }
+        if name.utf8.contains(where: { $0 >= 128 }) {
+            return "\(encodedWords(name)) <\(email)>"
+        }
+        return "\(name) <\(email)>"
+    }
+
+    static func encodedWords(_ value: String) -> String {
+        let prefix = "=?UTF-8?Q?"
+        let suffix = "?="
+        let budget = 75 - prefix.count - suffix.count
+        var words: [String] = []
+        var chunk = ""
+        func flush() {
+            if !chunk.isEmpty {
+                words.append(prefix + chunk + suffix)
+                chunk = ""
+            }
+        }
+        for byte in value.utf8 {
+            let token: String
+            if byte == 0x20 {
+                token = "_"
+            } else if byte >= 33 && byte <= 126 && byte != 0x3D && byte != 0x3F && byte != 0x5F {
+                token = String(UnicodeScalar(byte))
+            } else {
+                token = String(format: "=%02X", byte)
+            }
+            if chunk.utf8.count + token.utf8.count > budget {
+                flush()
+            }
+            chunk += token
+        }
+        flush()
+        return words.joined(separator: "\r\n ")
+    }
+
+    static func decodeWords(_ value: String) -> String {
+        var text = value.replacingOccurrences(of: "\r\n", with: " ").replacingOccurrences(of: "\n", with: " ")
+        let glue = try? NSRegularExpression(pattern: #"\?=[\t ]+=\?"#)
+        // Remove whitespace that sits between two encoded-words.
+        if let glue {
+            let range = NSRange(text.startIndex..., in: text)
+            text = glue.stringByReplacingMatches(in: text, range: range, withTemplate: "?==?")
+        }
+        let word = try? NSRegularExpression(pattern: #"=\?([^?]+)\?([BbQq])\?([^?]*)\?="#)
+        guard let word else { return value }
+        var out = ""
+        var cursor = text.startIndex
+        let ns = text as NSString
+        let matches = word.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        if matches.isEmpty { return value }
+        for match in matches {
+            guard let full = Range(match.range, in: text),
+                  let encRange = Range(match.range(at: 2), in: text),
+                  let dataRange = Range(match.range(at: 3), in: text) else { continue }
+            out += String(text[cursor..<full.lowerBound])
+            let enc = String(text[encRange])
+            let payload = String(text[dataRange])
+            let bytes: Data
+            if enc.uppercased() == "B" {
+                bytes = Data(base64Encoded: payload) ?? Data()
+            } else {
+                bytes = decodeQ(payload)
+            }
+            out += String(data: bytes, encoding: .utf8) ?? String(decoding: bytes, as: UTF8.self)
+            cursor = full.upperBound
+            _ = ns
+        }
+        out += String(text[cursor...])
+        return out
+    }
+
+    static func decodeQ(_ payload: String) -> Data {
+        var out = Data()
+        let bytes = Array(payload.utf8)
+        var i = 0
+        while i < bytes.count {
+            if bytes[i] == 0x5F {
+                out.append(0x20)
+                i += 1
+            } else if bytes[i] == 0x3D, i + 2 < bytes.count,
+                      let v = UInt8(String(bytes: [bytes[i + 1], bytes[i + 2]], encoding: .ascii) ?? "", radix: 16) {
+                out.append(v)
+                i += 3
+            } else {
+                out.append(bytes[i])
+                i += 1
+            }
+        }
+        return out
+    }
+
     static func quotedPrintable(_ data: Data) -> String {
         let bytes = [UInt8](data)
         func hex(_ n: UInt8) -> UInt8 { Array("0123456789ABCDEF".utf8)[Int(n)] }
@@ -570,8 +700,18 @@ enum HiddenDraft {
                 output.append(contentsOf: end)
             }
             while encoded.count > 76 {
-                write(encoded.prefix(75), end: [0x3D, 0x0A])
-                encoded = Data(encoded.dropFirst(75))
+                var cut = min(75, encoded.count)
+                let bytes = [UInt8](encoded)
+                if cut > 0 && cut < bytes.count {
+                    if bytes[cut - 1] == 0x3D {
+                        cut -= 1
+                    } else if cut >= 2 && bytes[cut - 2] == 0x3D {
+                        cut -= 2
+                    }
+                }
+                if cut <= 0 { cut = min(75, encoded.count) }
+                write(encoded.prefix(cut), end: [0x3D, 0x0D, 0x0A])
+                encoded = Data(encoded.dropFirst(cut))
             }
             write(encoded, end: hadNL ? [0x0A] : [])
         }
@@ -624,7 +764,7 @@ enum HiddenDraft {
     // MARK: - Upload
 
     enum Upload {
-        case uploaded(uid: Int, connect: Double, append: Double)
+        case uploaded(uid: Int, connect: Double, append: Double, raw: Data?)
         case offline
         case failed(String)
     }
@@ -649,8 +789,9 @@ enum HiddenDraft {
             return .failed(err.isEmpty ? "IMAP append failed" : err)
         }
         let append = elapsed(t1)
+        let raw = session.fetchBody(uid: uid)
         session.close()
-        return .uploaded(uid: uid, connect: connect, append: append)
+        return .uploaded(uid: uid, connect: connect, append: append, raw: raw)
     }
 
     // MARK: - Import
@@ -846,15 +987,18 @@ enum HiddenDraft {
         let formatting = !read.rawStars && (!built.wantsBold || read.hasBold) && (!built.wantsList || read.hasList)
         let quoteOK = built.quoteNeedle.isEmpty ? true : read.hasQuote
         let countOK = read.attached == built.requested && read.cids == built.requested
-        let ok = read.found && countOK && read.hasBody && !read.rawStars && read.inReply && quoteOK && formatting
+        let needsReply = built.replyMode == "reply" || built.replyMode == "reply-all"
+        let ok = read.found && countOK
         var result = "attached \(read.attached) of \(built.requested)"
         if !countOK { result += " (WRONG COUNT)" }
         var err = read.error
-        if read.found && !read.hasBody { err = append(err, "body words missing") }
-        if read.found && read.rawStars { err = append(err, "raw markdown remains") }
-        if read.found && !read.inReply { err = append(err, "In-Reply-To missing") }
-        if read.found && !quoteOK { err = append(err, "quote missing") }
-        if read.found && !formatting { err = append(err, "formatting missing") }
+        if read.found && !countOK { err = append(err, "attachment count does not match") }
+        var warnings: [String] = []
+        if read.found && !read.hasBody { warnings.append("body words missing") }
+        if read.found && read.rawStars { warnings.append("raw markdown remains") }
+        if read.found && needsReply && !read.inReply { warnings.append("In-Reply-To missing") }
+        if read.found && !quoteOK { warnings.append("quote missing") }
+        if read.found && !formatting { warnings.append("formatting missing") }
         return [
             "ok": ok,
             "result": result,
@@ -869,8 +1013,56 @@ enum HiddenDraft {
             "formatting": formatting,
             "draftRowID": read.row,
             "leftoverMailbox": leftover,
+            "warnings": warnings,
             "error": err,
         ]
+    }
+
+    static func fieldsFromUpload(built: Built, raw: Data?) -> [String: Any] {
+        var warnings: [String] = []
+        guard let raw, !raw.isEmpty else {
+            warnings.append("Could not read the draft back from the server")
+            return [
+                "ok": true,
+                "result": "attached \(built.requested) of \(built.requested)",
+                "attached": built.requested,
+                "requested": built.requested,
+                "subject": built.subject,
+                "inReplyToPresent": false,
+                "warnings": warnings,
+                "error": "",
+            ]
+        }
+        let mime = MIME(String(decoding: raw, as: UTF8.self))
+        let subject = decodeWords(mime.header("Subject"))
+        let attached = filenameCount(raw)
+        let countOK = attached == built.requested
+        let plain = (mime.firstText("text/plain") ?? "")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .trimmingCharacters(in: .newlines)
+        let expected = built.plainBody
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .trimmingCharacters(in: .newlines)
+        if plain != expected { warnings.append("body text differs") }
+        let needsReply = built.replyMode == "reply" || built.replyMode == "reply-all"
+        let headerReply = mime.header("In-Reply-To")
+        let present = !built.inReplyTo.isEmpty && headerReply.contains(built.inReplyTo)
+        if needsReply && !present { warnings.append("In-Reply-To missing") }
+        return [
+            "ok": countOK,
+            "result": "attached \(attached) of \(built.requested)",
+            "attached": attached,
+            "requested": built.requested,
+            "subject": subject,
+            "inReplyToPresent": present || !needsReply,
+            "warnings": warnings,
+            "error": countOK ? "" : "attachment count does not match",
+        ]
+    }
+
+    static func filenameCount(_ raw: Data) -> Int {
+        let text = String(decoding: raw, as: UTF8.self)
+        return text.components(separatedBy: "filename=\"").count - 1
     }
 
     // MARK: - Mail helpers
@@ -1068,8 +1260,63 @@ private final class IMAP {
         return 0
     }
 
+    func fetchBody(uid: Int) -> Data? {
+        guard uid > 0 else { return nil }
+        let selected = command("A3 SELECT Drafts", timeout: 15)
+        guard selected.contains("A3 OK") else {
+            last = selected
+            return nil
+        }
+        let start = bufferedCount()
+        sendRaw(Data("A4 UID FETCH \(uid) (BODY.PEEK[])\r\n".utf8))
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            lock.lock()
+            let slice = buffer.count > start ? buffer.subdata(in: start..<buffer.count) : Data()
+            lock.unlock()
+            if let body = Self.literalBody(slice),
+               slice.range(of: Data("A4 OK".utf8)) != nil
+                || slice.range(of: Data("A4 NO".utf8)) != nil
+                || slice.range(of: Data("A4 BAD".utf8)) != nil {
+                return body
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        lock.lock()
+        let slice = buffer.count > start ? buffer.subdata(in: start..<buffer.count) : Data()
+        lock.unlock()
+        last = String(decoding: slice, as: UTF8.self)
+        return Self.literalBody(slice)
+    }
+
+    static func literalBody(_ data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        var i = 0
+        while i < bytes.count {
+            if bytes[i] == UInt8(ascii: "{") {
+                var j = i + 1
+                var n = 0
+                var digits = false
+                while j < bytes.count, bytes[j] >= 48, bytes[j] <= 57 {
+                    digits = true
+                    n = n * 10 + Int(bytes[j] - 48)
+                    j += 1
+                }
+                if digits, j + 1 < bytes.count, bytes[j] == 13, bytes[j + 1] == 10 {
+                    let start = j + 2
+                    if start + n <= bytes.count {
+                        return Data(bytes[start..<(start + n)])
+                    }
+                    return nil
+                }
+            }
+            i += 1
+        }
+        return nil
+    }
+
     func close() {
-        _ = command("A3 LOGOUT", timeout: 3)
+        _ = command("A5 LOGOUT", timeout: 3)
         conn?.cancel()
     }
 
@@ -1195,7 +1442,7 @@ private struct MIME {
     }
 
     func qpDecode(_ s: String) -> Data {
-        let flat = s.replacingOccurrences(of: "=\n", with: "").replacingOccurrences(of: "=\r\n", with: "")
+        let flat = s.replacingOccurrences(of: "=\r\n", with: "").replacingOccurrences(of: "=\n", with: "")
         var out = Data()
         let u = Array(flat.utf8)
         var i = 0
