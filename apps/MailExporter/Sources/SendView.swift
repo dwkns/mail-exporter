@@ -15,7 +15,8 @@ struct DraftDropZone: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             dropZone
-                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: inbox.currentBatch == nil ? 120 : 360)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
 
             if !inbox.earlierBatches.isEmpty {
                 DisclosureGroup(isExpanded: $earlierExpanded) {
@@ -65,21 +66,25 @@ struct DraftDropZone: View {
         }
     }
 
-    private func bannerText(for outcome: ComposeFileOutcome) -> String {
-        let sentence = ComposeFailureCopy.banner(summary: "Compose failed", detail: outcome.detail)
-        return "\(outcome.name): \(sentence)"
+    private func failureLines(for outcome: ComposeFileOutcome) -> [String] {
+        ComposeFailureCopy.lines(name: outcome.name, summary: "Compose failed", detail: outcome.detail)
     }
 
     private func fileBanner(_ outcome: ComposeFileOutcome) -> some View {
-        let text = bannerText(for: outcome)
+        let lines = failureLines(for: outcome)
+        let ink = bannerBright ? Color.white : Color.red
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(bannerBright ? Color.white : Color.red)
-            Text(text)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(bannerBright ? Color.white : Color.red)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(ink)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    Text("• \(line)")
+                        .font(.callout)
+                        .foregroundStyle(ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             Button {
                 dismissedOutcomeIDs.insert(outcome.id)
             } label: {
@@ -87,7 +92,7 @@ struct DraftDropZone: View {
                     .font(.caption.weight(.bold))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(bannerBright ? Color.white : Color.red)
+            .foregroundStyle(ink)
             .accessibilityLabel("Dismiss")
         }
         .padding(8)
@@ -97,7 +102,7 @@ struct DraftDropZone: View {
                 .fill(Color.red.opacity(bannerBright ? 0.95 : 0.16))
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(text)
+        .accessibilityLabel(lines.joined(separator: " "))
     }
 
     private func earlierBatch(_ batch: DropBatch) -> some View {
@@ -109,10 +114,12 @@ struct DraftDropZone: View {
             }
             ForEach(Array(batch.outcomes.enumerated()), id: \.element.id) { _, outcome in
                 if !outcome.ok {
-                    Text(bannerText(for: outcome))
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(Array(failureLines(for: outcome).enumerated()), id: \.offset) { _, line in
+                        Text("• \(line)")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
@@ -121,22 +128,25 @@ struct DraftDropZone: View {
 
     private var dropZone: some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        return ZStack {
-            shape.fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
-            wellContent
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            shape.strokeBorder(
-                isTargeted
-                    ? Color.accentColor
-                    : Color.primary.opacity(0.28),
-                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+        return wellContent
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(
+                shape.fill(isTargeted ? Color.accentColor.opacity(0.14) : dropWellFill)
             )
-            .allowsHitTesting(false)
-        }
-        .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
-            handleDrop(providers)
-        }
+            .overlay(
+                shape.strokeBorder(
+                    isTargeted
+                        ? Color.accentColor
+                        : Color.primary.opacity(0.28),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                )
+                .allowsHitTesting(false)
+            )
+            .onDrop(of: [UTType.fileURL], isTargeted: $isTargeted) { providers in
+                handleDrop(providers)
+            }
     }
 
     private var wellContent: some View {

@@ -56,43 +56,89 @@ enum AttachCountCheck {
     }
 }
 
-/// Plain words for a failed draft. One failure sentence and one recovery sentence.
+/// Plain words for a failed draft. Short bullets: what failed, then how to recover.
 enum ComposeFailureCopy {
-    static func banner(summary: String, detail: String) -> String {
+    static func lines(name: String, summary: String, detail: String) -> [String] {
         let raw = summary + "\n" + detail
         let blob = raw.lowercased()
+        let head = name.isEmpty ? "The draft failed" : "\(name) failed"
         if isMissingQuote(blob) {
-            return join(countNote(raw), missingQuoteFailure, missingQuoteRecovery)
+            return withCount(raw, [
+                head,
+                "This reply has no original message to quote.",
+                "Add an In-Reply-To line that matches a Message-ID in the project Email folder.",
+                "Or set Reply: new if it is not a reply.",
+            ])
         }
         if blob.contains("attachment not found") {
-            return join(countNote(raw), "An attachment file is missing.", "Put the file inside the project folder, fix the Attach line, and drop the Markdown again.")
+            return withCount(raw, [
+                head,
+                "An attachment file is missing.",
+                "Put the file inside the project folder.",
+                "Fix the Attach line, then drop the Markdown again.",
+            ])
         }
         if blob.contains("must stay inside the project") {
-            return join(countNote(raw), "An attachment is outside the project folder.", "Move the file into the project, update the Attach line, and drop the Markdown again.")
+            return withCount(raw, [
+                head,
+                "An attachment is outside the project folder.",
+                "Move the file into the project.",
+                "Update the Attach line, then drop the Markdown again.",
+            ])
         }
         if blob.contains("file not found") || blob.contains("no markdown files") {
-            return join(nil, "The Markdown file is missing.", "Choose the file again from its folder.")
+            return [
+                head,
+                "The Markdown file is missing.",
+                "Choose the file again from its folder.",
+            ]
         }
         if let counts = mismatchedCounts(raw) {
-            return "Mail attached \(counts.attached) of \(counts.requested) files. Check that every path on the Attach line is a file inside the project, then drop the Markdown again."
+            return [
+                head,
+                "Mail attached \(counts.attached) of \(counts.requested) files.",
+                "Check that every path on the Attach line is a file inside the project.",
+                "Drop the Markdown again.",
+            ]
         }
         if MailAccessProbe.looksLikeAutomationDenial(raw) {
-            return join(countNote(raw), "Mail did not allow this app to control it.", "Turn on Automation for MailExporter under Privacy & Security, then drop the file again.")
+            return [
+                head,
+                "Mail did not allow this app to control it.",
+                "Turn on Automation for MailExporter under Privacy & Security.",
+                "Drop the file again.",
+            ]
         }
         if isMailSilent(blob) {
-            return join(countNote(raw), "Mail did not answer.", "Open Mail and leave it running, then drop the file again.")
+            return [
+                head,
+                "Mail did not answer.",
+                "Open Mail and leave it running.",
+                "Drop the file again.",
+            ]
         }
         if blob.contains("security add-generic-password") || blob.contains("mailexporter icloud imap") {
-            return join(countNote(raw), "No password is stored for this iCloud account.", "Add a keychain item named MailExporter iCloud IMAP for the From address, then drop the file again.")
+            return [
+                head,
+                "No password is stored for this iCloud account.",
+                "Add a keychain item named MailExporter iCloud IMAP for the From address.",
+                "Drop the file again.",
+            ]
         }
         if isImportOrServer(blob) {
-            return join(countNote(raw), "Mail could not import the draft.", "Leave Mail open and drop the file again.")
+            return [
+                head,
+                "Mail could not import the draft.",
+                "Leave Mail open.",
+                "Drop the file again.",
+            ]
         }
-        return join(countNote(raw), "The draft was not created.", "Check the Markdown file, then drop it again.")
+        return withCount(raw, [
+            head,
+            "The draft was not created.",
+            "Check the Markdown file, then drop it again.",
+        ])
     }
-
-    private static let missingQuoteFailure = "This reply has no original message to quote."
-    private static let missingQuoteRecovery = "Add an In-Reply-To line whose value is the Message-ID of an exported .eml in the project Email folder, or set Reply: new if it is not a reply."
 
     private static func isMissingQuote(_ blob: String) -> Bool {
         blob.contains("in-reply-to")
@@ -131,8 +177,12 @@ enum ComposeFailureCopy {
         return counts
     }
 
-    private static func join(_ count: String?, _ failure: String, _ recovery: String) -> String {
-        [count, failure, recovery].compactMap { $0 }.joined(separator: " ")
+    /// Add the attachment count only when that count is part of the failure.
+    private static func withCount(_ raw: String, _ lines: [String]) -> [String] {
+        guard let note = countNote(raw), lines.count > 1 else { return lines }
+        var copy = lines
+        copy.insert(note, at: 1)
+        return copy
     }
 }
 
