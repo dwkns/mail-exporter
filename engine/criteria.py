@@ -123,7 +123,7 @@ def _parse_conjunction(raw: Any, label: str) -> Literal["any", "all"]:
     return mode  # type: ignore[return-value]
 
 
-def _parse_clause(item: dict[str, Any], label: str) -> Clause | None:
+def _parse_clause(item: dict[str, Any], label: str, *, strict: bool = False) -> Clause | None:
     field = _normalize_field(str(item.get("field", "")))
     op = _normalize_op(str(item.get("op", "")))
     if field in TEXT_FIELDS:
@@ -137,6 +137,8 @@ def _parse_clause(item: dict[str, Any], label: str) -> Clause | None:
             raise ValueError(f"{label}: values must be an array")
         cleaned = [str(v).strip() for v in values if str(v).strip()]
         if not cleaned:
+            if strict:
+                raise ValueError(f"{label}: values must be a non-empty array")
             # Empty editor row (New Project default). Skip; do not fail Check Matches.
             return None
         return Clause(field=field, op=op, values=cleaned)
@@ -145,6 +147,8 @@ def _parse_clause(item: dict[str, Any], label: str) -> Clause | None:
             raise ValueError(f"{label}: op must be after|before for date")
         dv = item.get("date") or item.get("value")
         if not dv:
+            if strict:
+                raise ValueError(f"{label}: date must be a non-empty value")
             return None
         return Clause(field="date", op=op, date_value=parse_date(str(dv)))
     raise ValueError(
@@ -153,20 +157,22 @@ def _parse_clause(item: dict[str, Any], label: str) -> Clause | None:
     )
 
 
-def _parse_conditions(raw: Any, label: str) -> list[Clause]:
+def _parse_conditions(raw: Any, label: str, *, strict: bool = False) -> list[Clause]:
     if not isinstance(raw, list):
         raise ValueError(f"{label} must be an array")
     clauses: list[Clause] = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             continue
-        parsed = _parse_clause(item, f"{label}[{i}]")
+        parsed = _parse_clause(item, f"{label}[{i}]", strict=strict)
         if parsed is not None:
             clauses.append(parsed)
+    if strict and not clauses:
+        raise ValueError(f"{label} must be a non-empty array")
     return clauses
 
 
-def _parse_group(raw: dict[str, Any], label: str) -> MatchGroup:
+def _parse_group(raw: dict[str, Any], label: str, *, strict: bool = False) -> MatchGroup:
     conjunction = _parse_conjunction(
         raw.get("conjunction") or raw.get("mode"), f"{label}.conjunction"
     )
@@ -182,11 +188,11 @@ def _parse_group(raw: dict[str, Any], label: str) -> MatchGroup:
         raise ValueError(f"{label} must include conditions")
     return MatchGroup(
         conjunction=conjunction,
-        clauses=_parse_conditions(conditions, f"{label}.conditions"),
+        clauses=_parse_conditions(conditions, f"{label}.conditions", strict=strict),
     )
 
 
-def parse_match(raw: dict[str, Any] | None) -> MatchSpec:
+def parse_match(raw: dict[str, Any] | None, *, strict: bool = False) -> MatchSpec:
     if not raw or not isinstance(raw, dict):
         raise ValueError("match object required")
 
@@ -200,7 +206,7 @@ def parse_match(raw: dict[str, Any] | None) -> MatchSpec:
             "match.conjunction",
         )
         groups = [
-            _parse_group(item, f"match.groups[{i}]")
+            _parse_group(item, f"match.groups[{i}]", strict=strict)
             for i, item in enumerate(groups_raw)
             if isinstance(item, dict)
         ]
@@ -227,7 +233,7 @@ def parse_match(raw: dict[str, Any] | None) -> MatchSpec:
     else:
         raise ValueError("match must include groups or conditions (or any/all)")
 
-    clauses = _parse_conditions(conditions, "match.conditions")
+    clauses = _parse_conditions(conditions, "match.conditions", strict=strict)
     return MatchSpec(
         conjunction="all",
         groups=[MatchGroup(conjunction=conjunction, clauses=clauses)],

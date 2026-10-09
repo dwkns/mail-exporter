@@ -335,3 +335,124 @@ def test_refuse_job_folder_inside_mail(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert not config.exists()
 
 
+def test_one_invalid_job_does_not_block_the_other(tmp_path: Path, monkeypatch) -> None:
+    """A saved empty condition is an error on that job only."""
+    monkeypatch.setattr("engine.export.candidate_paths", lambda *a, **k: [])
+    from engine.cli import run_export
+    from engine.jobs import apply_job_command, save_jobs
+
+    config = tmp_path / "jobs.json"
+    good_dir = tmp_path / "good"
+    bad_dir = tmp_path / "bad"
+    config.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "good-1",
+                        "name": "Good",
+                        "outputDir": str(good_dir),
+                        "match": {
+                            "conjunction": "all",
+                            "groups": [
+                                {
+                                    "conjunction": "any",
+                                    "conditions": [
+                                        {
+                                            "field": "entire",
+                                            "op": "contains",
+                                            "values": ["invoice"],
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "id": "bad-1",
+                        "name": "Bad",
+                        "outputDir": str(bad_dir),
+                        "bookmark": "keep-me",
+                        "match": {
+                            "conjunction": "all",
+                            "groups": [
+                                {
+                                    "conjunction": "any",
+                                    "conditions": [
+                                        {
+                                            "field": "entire",
+                                            "op": "contains",
+                                            "values": [],
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_jobs(config)
+    assert [j.name for j in loaded.jobs] == ["Good", "Bad"]
+    assert loaded.jobs[0].error == ""
+    assert loaded.jobs[0].match.clauses[0].values == ["invoice"]
+    bad = loaded.jobs[1]
+    assert bad.output_dir == str(bad_dir)
+    assert "Bad (bad-1)" in bad.error
+    assert str(config) in bad.error
+    assert "match.groups[0].conditions[0]: values must be a non-empty array" in bad.error
+    save_jobs(loaded, config)
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    assert raw["jobs"][1]["bookmark"] == "keep-me"
+    assert raw["jobs"][1]["match"]["groups"][0]["conditions"][0]["values"] == []
+
+    good, good_code = run_export(
+        config=str(config),
+        job_id=None,
+        job_name="Good",
+        dry_run=True,
+        force_full=False,
+    )
+    assert good_code == 0
+    assert good["ok"] is True
+    assert good["results"][0]["matchCount"] == 0
+
+    refused, refused_code = run_export(
+        config=str(config),
+        job_id=None,
+        job_name="Bad",
+        dry_run=True,
+        force_full=False,
+    )
+    assert refused_code == 1
+    assert refused["ok"] is False
+    assert "values must be a non-empty array" in refused["error"]
+    assert "Bad (bad-1)" in refused["error"]
+
+    empty = apply_job_command(
+        {
+            "cmd": "create-job",
+            "name": "Empty Row",
+            "outputDir": str(tmp_path / "empty"),
+            "match": {
+                "conjunction": "any",
+                "groups": [
+                    {
+                        "conjunction": "any",
+                        "conditions": [
+                            {"field": "entire", "op": "contains", "values": []}
+                        ],
+                    }
+                ],
+            },
+        },
+        config,
+    )
+    assert empty["ok"] is False
+    assert "values must be a non-empty array" in empty["error"]
+    again = json.loads(config.read_text(encoding="utf-8"))
+    assert [j["name"] for j in again["jobs"]] == ["Good", "Bad"]
+
+

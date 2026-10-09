@@ -40,6 +40,63 @@ def test_mcp_list_jobs_with_tmpdir(
     assert data["jobs"][0]["name"] == "DHL"
 
 
+def test_mcp_reads_folder_when_another_job_match_is_invalid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = tmp_path / "jobs.json"
+    folder = tmp_path / "Email"
+    folder.mkdir()
+    (folder / "2026-01-01_000000_hi_abc.eml").write_bytes(
+        b"From: a@b.com\r\nSubject: Hi\r\n"
+        b"Date: Wed, 1 Jan 2026 00:00:00 +0000\r\n"
+        b"Message-ID: <abc@example.com>\r\n\r\nHello\r\n"
+    )
+    config.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "bad-1",
+                        "name": "Bad",
+                        "outputDir": str(folder),
+                        "match": {
+                            "conjunction": "all",
+                            "groups": [
+                                {
+                                    "conjunction": "any",
+                                    "conditions": [
+                                        {
+                                            "field": "entire",
+                                            "op": "contains",
+                                            "values": [],
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
+    import importlib
+    import mailexporter_mcp as m
+
+    importlib.reload(m)
+    listed = json.loads(m.list_jobs())
+    assert "values must be a non-empty array" in listed["jobs"][0]["error"]
+    assert "Bad (bad-1)" in listed["jobs"][0]["error"]
+    assert str(config) in listed["jobs"][0]["error"]
+    messages = json.loads(m.list_messages(job_name="Bad"))
+    assert messages["count"] == 1
+    assert messages["messages"][0]["messageId"] == "<abc@example.com>"
+    drafts = json.loads(m.list_drafts(job_name="Bad"))
+    assert drafts["job"] == "Bad"
+    assert drafts["drafts"] == []
+
+
 def test_mcp_compose_draft_routes(tmp_path: Path) -> None:
     md = tmp_path / "reply.md"
     (tmp_path / "a.pdf").write_bytes(b"%PDF")

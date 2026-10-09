@@ -21,6 +21,8 @@ Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`
 
 `export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
 
+One bad job does not stop the others. `list_jobs` still lists every job. A job whose saved condition has no value includes an `error` field. That text names the job name, the job id, the config file, and the condition (`match.groups[0].conditions[0]: values must be a non-empty array`). `list_messages`, `list_drafts`, and `read_message` still read that folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse an empty condition row.
+
 `read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder**. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space. After the draft opens, `compose_draft` reports attached vs requested and fails if they differ. Do not put a job folder inside Apple Mail’s private folder.
 
 ## First read

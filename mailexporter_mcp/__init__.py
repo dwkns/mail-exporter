@@ -327,20 +327,14 @@ def _body_text(msg: Message, limit: int = 120_000) -> str:
 
 @mcp.tool()
 def list_jobs() -> str:
-    """List MailExporter jobs (exports) and their folders."""
+    """List MailExporter jobs (exports) and their folders.
+
+    A job with a bad match is still listed. Its ``error`` names the job name,
+    job id, config file, and condition. Other jobs still load.
+    """
     path = _config_path()
     jobs = load_jobs(path).jobs
-    rows = [
-        {
-            "id": j.id,
-            "name": j.name,
-            "outputDir": j.output_dir,
-            "includeSent": j.include_sent,
-            "includeBin": j.include_bin,
-            "includeThread": j.include_thread,
-        }
-        for j in jobs
-    ]
+    rows = [_job_row(j) for j in jobs]
     return json.dumps({"config": str(path), "jobs": rows}, indent=2)
 
 
@@ -493,6 +487,9 @@ def check_matches(
     """Dry-run: count how many Apple Mail messages currently match a job.
 
     Pass ``job_name`` (or ``job_id``). Other arguments are optional.
+    A job with an empty saved condition returns ``error`` and does not stop
+    other jobs. ``list_messages``, ``list_drafts``, and ``read_message`` do
+    not need a valid match.
     """
     return json.dumps(
         _call_export(job_name=job_name, job_id=job_id, dry_run=True),
@@ -588,6 +585,8 @@ def _job_row(j: Job) -> dict[str, Any]:
     }
     if j.project_dir:
         row["projectDir"] = j.project_dir
+    if j.error:
+        row["error"] = j.error
     return row
 
 
@@ -628,7 +627,10 @@ def create_job(
     include_bin: bool = False,
     include_thread: bool = False,
 ) -> str:
-    """Create a MailExporter job. match_json is a MatchSpec object (same shape as jobs.json)."""
+    """Create a MailExporter job. match_json is a MatchSpec object (same shape as jobs.json).
+
+    An empty condition row is refused. The error names that condition.
+    """
     name = name.strip()
     output_dir = output_dir.strip()
     if not name:
@@ -671,7 +673,10 @@ def edit_job(
     include_bin: str = "",
     include_thread: str = "",
 ) -> str:
-    """Update an existing job. Empty strings leave that field unchanged."""
+    """Update an existing job. Empty strings leave that field unchanged.
+
+    An empty condition row is refused. The error names that condition.
+    """
     if match_json.strip():
         try:
             parsed = json.loads(match_json)

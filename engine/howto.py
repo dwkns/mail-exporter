@@ -186,6 +186,8 @@ Or Settings → Advanced → Install mail-exporter MCP.
 | `compose_draft` | Open Mail draft/reply from Markdown in `Drafts/`. |
 | `check_matches` / `export_job` | Refresh from Apple Mail. Pass `job_name` only; omit `job_id` / `force_full` unless needed. |
 
+One bad job does not stop the others. If a saved condition has no value, `list_jobs` still returns every job. The bad job has an `error` field. That text names the job name, the job id, the config file, and the condition, for example `match.groups[0].conditions[0]: values must be a non-empty array`. `list_messages`, `list_drafts`, and `read_message` still read that job's folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse to save an empty condition row.
+
 Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{drafts}/NNN_who_subject.md` → `compose_draft` when they say send it → `export_job` again after they send.
 
 ## Ground rules
