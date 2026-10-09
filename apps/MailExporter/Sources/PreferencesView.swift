@@ -162,16 +162,12 @@ struct UpdatesPreferencesView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.0"
     }
 
-    private var build: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-    }
-
     var body: some View {
         SettingsPane {
             VStack(alignment: .leading, spacing: 2) {
                 Text("MailExporter")
                     .font(.subheadline.weight(.semibold))
-                Text("Version \(version) (build \(build))")
+                Text("Version \(version)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
