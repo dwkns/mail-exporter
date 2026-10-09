@@ -76,6 +76,8 @@ final class ComposeRunner: ObservableObject {
 
     @Published var busy = false
     @Published var lastResult: ComposeResult?
+    /// Bumps each time a compose result is stored, including a repeat of the same failure.
+    @Published private(set) var resultGeneration: UInt = 0
     @Published var statusLines: [String] = []
 
     private init() {}
@@ -99,7 +101,6 @@ final class ComposeRunner: ObservableObject {
             inbox.recordDrops(md)
         }
         busy = true
-        lastResult = nil
         let names = md.map(\.lastPathComponent).joined(separator: ", ")
         statusLines.insert("Processing: \(names)", at: 0)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -116,6 +117,7 @@ final class ComposeRunner: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = false
                 self.lastResult = result
+                self.resultGeneration &+= 1
                 DraftNotifier.announce(result, draftCount: md.count)
                 self.statusLines.insert(result.summary, at: 0)
                 if self.statusLines.count > 12 {

@@ -40,6 +40,86 @@ enum AttachCountCheck {
     }
 }
 
+/// Plain words for a failed draft. One failure sentence and one recovery sentence.
+enum ComposeFailureCopy {
+    static func banner(summary: String, detail: String) -> String {
+        let raw = summary + "\n" + detail
+        let blob = raw.lowercased()
+        if isMissingQuote(blob) {
+            return join(countNote(raw), missingQuoteFailure, missingQuoteRecovery)
+        }
+        if blob.contains("attachment not found") {
+            return join(countNote(raw), "An attachment file is missing.", "Put the file inside the project folder, fix the Attach line, and drop the Markdown again.")
+        }
+        if blob.contains("must stay inside the project") {
+            return join(countNote(raw), "An attachment is outside the project folder.", "Move the file into the project, update the Attach line, and drop the Markdown again.")
+        }
+        if blob.contains("file not found") || blob.contains("no markdown files") {
+            return join(nil, "The Markdown file is missing.", "Choose the file again from its folder.")
+        }
+        if let counts = mismatchedCounts(raw) {
+            return "Mail attached \(counts.attached) of \(counts.requested) files. Check that every path on the Attach line is a file inside the project, then drop the Markdown again."
+        }
+        if MailAccessProbe.looksLikeAutomationDenial(raw) {
+            return join(countNote(raw), "Mail did not allow this app to control it.", "Turn on Automation for MailExporter under Privacy & Security, then drop the file again.")
+        }
+        if isMailSilent(blob) {
+            return join(countNote(raw), "Mail did not answer.", "Open Mail and leave it running, then drop the file again.")
+        }
+        if blob.contains("security add-generic-password") || blob.contains("mailexporter icloud imap") {
+            return join(countNote(raw), "No password is stored for this iCloud account.", "Add a keychain item named MailExporter iCloud IMAP for the From address, then drop the file again.")
+        }
+        if isImportOrServer(blob) {
+            return join(countNote(raw), "Mail could not import the draft.", "Leave Mail open and drop the file again.")
+        }
+        return join(countNote(raw), "The draft was not created.", "Check the Markdown file, then drop it again.")
+    }
+
+    private static let missingQuoteFailure = "This reply has no original message to quote."
+    private static let missingQuoteRecovery = "Add an In-Reply-To line whose value is the Message-ID of an exported .eml in the project Email folder, or set Reply: new if it is not a reply."
+
+    private static func isMissingQuote(_ blob: String) -> Bool {
+        blob.contains("in-reply-to")
+            || blob.contains("no exported .eml")
+            || blob.contains("invent a quote")
+            || blob.contains("quote missing")
+    }
+
+    private static func isMailSilent(_ blob: String) -> Bool {
+        blob.contains("mail did not show the draft")
+            || blob.contains("mail came to the front")
+            || blob.contains("mail window appeared")
+            || blob.contains("could not compile")
+            || blob.contains("no account")
+    }
+
+    private static func isImportOrServer(_ blob: String) -> Bool {
+        blob.contains("import")
+            || blob.contains("imap")
+            || blob.contains("append")
+            || blob.contains("not reachable")
+            || blob.contains("no continuation")
+            || blob.contains("login failed")
+    }
+
+    /// Present only when the attachment count itself is wrong.
+    private static func countNote(_ raw: String) -> String? {
+        guard let counts = mismatchedCounts(raw) else { return nil }
+        return "Mail attached \(counts.attached) of \(counts.requested) files."
+    }
+
+    private static func mismatchedCounts(_ raw: String) -> (attached: Int, requested: Int)? {
+        guard let counts = AttachCountCheck.parse(raw), counts.requested > 0, counts.attached != counts.requested else {
+            return nil
+        }
+        return counts
+    }
+
+    private static func join(_ count: String?, _ failure: String, _ recovery: String) -> String {
+        [count, failure, recovery].compactMap { $0 }.joined(separator: " ")
+    }
+}
+
 enum ComposeBridge {
     /// Open drafts in the background. Upload when iCloud IMAP is ready. Import otherwise.
     static func compose(markdownFiles: [URL]) throws -> ComposeResult {

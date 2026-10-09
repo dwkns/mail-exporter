@@ -8,6 +8,8 @@ struct DraftDropZone: View {
     @ObservedObject private var runner = ComposeRunner.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isTargeted = false
+    @State private var dismissedGeneration: UInt = 0
+    @State private var bannerBright = false
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -19,26 +21,17 @@ struct DraftDropZone: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             dropZone
-                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: 120)
+                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: failureText == nil ? 120 : 220)
 
-            if let lastResult = runner.lastResult {
+            if let lastResult = runner.lastResult, lastResult.ok {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(lastResult.summary)
                         .font(.callout.weight(.medium))
                     Text(lastResult.detail)
                         .font(.caption)
-                        .foregroundStyle(lastResult.ok ? Color.secondary : Color.primary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(4)
                         .textSelection(.enabled)
-                    if let pane = MailAccessProbe.settingsPane(
-                        for: lastResult.summary + "\n" + lastResult.detail
-                    ) {
-                        Button(pane.buttonTitle) {
-                            pane.open()
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                    }
                 }
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -50,6 +43,50 @@ struct DraftDropZone: View {
         .onChange(of: runner.busy) { isBusy in
             if !isBusy { runner.drainInbox() }
         }
+        .onChange(of: runner.resultGeneration) { generation in
+            guard failureText != nil, dismissedGeneration != generation else { return }
+            bannerBright = true
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.55)) {
+                    bannerBright = false
+                }
+            }
+        }
+    }
+
+    private var failureText: String? {
+        guard let result = runner.lastResult, !result.ok else { return nil }
+        guard dismissedGeneration != runner.resultGeneration else { return nil }
+        return ComposeFailureCopy.banner(summary: result.summary, detail: result.detail)
+    }
+
+    private var failureBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(bannerBright ? Color.white : Color.red)
+            Text(failureText ?? "")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(bannerBright ? Color.white : Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                dismissedGeneration = runner.resultGeneration
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(bannerBright ? Color.white : Color.red)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.red.opacity(bannerBright ? 0.95 : 0.16))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(failureText ?? "Draft failed")
     }
 
     private var recentDropsPanel: some View {
@@ -99,6 +136,7 @@ struct DraftDropZone: View {
     }
 
     private var wellContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 14) {
             dropMessageIcon
             VStack(alignment: .leading, spacing: 2) {
@@ -132,6 +170,10 @@ struct DraftDropZone: View {
                 recentDropsPanel
                     .frame(width: 196)
             }
+        }
+        if failureText != nil {
+            failureBanner
+        }
         }
     }
 
