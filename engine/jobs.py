@@ -46,8 +46,14 @@ class Job:
     include_thread: bool = False
     project_dir: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    # Set when this saved job's match cannot be used. Other jobs still load.
+    error: str = ""
+    # Original job object. A later save must not replace a bad match with an empty one.
+    source: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        if self.error and self.source is not None:
+            return dict(self.source)
         data: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
@@ -152,13 +158,21 @@ def default_jobs_path() -> Path:
     return home / _LOCAL_JOBS_REL
 
 
-def parse_job(raw: dict[str, Any], *, require_output_dir: bool = True) -> Job:
+def parse_job(
+    raw: dict[str, Any],
+    *,
+    require_output_dir: bool = True,
+    strict_match: bool = False,
+) -> Job:
     jid = str(raw.get("id") or uuid.uuid4())
     name = str(raw.get("name") or "").strip() or "Untitled"
     output = str(raw.get("outputDir") or "").strip()
     if not output and require_output_dir:
         raise ValueError(f"job {name!r}: outputDir required")
-    match = parse_match(raw.get("match") if isinstance(raw.get("match"), dict) else None)
+    match = parse_match(
+        raw.get("match") if isinstance(raw.get("match"), dict) else None,
+        strict=strict_match,
+    )
     extra = {k: v for k, v in raw.items() if k not in _KNOWN_JOB_KEYS}
     return Job(
         id=jid,
@@ -173,6 +187,32 @@ def parse_job(raw: dict[str, Any], *, require_output_dir: bool = True) -> Job:
     )
 
 
+def _job_error(raw: dict[str, Any], path: Path, detail: str) -> str:
+    name = str(raw.get("name") or "").strip() or "Untitled"
+    jid = str(raw.get("id") or "").strip() or "(no id)"
+    return f"{name} ({jid}): {path}: {detail}"
+
+
+def _invalid_job(raw: dict[str, Any], path: Path, exc: ValueError) -> Job:
+    """Keep a saved job that has a bad match. Do not drop the other jobs."""
+    name = str(raw.get("name") or "").strip() or "Untitled"
+    jid = str(raw.get("id") or "").strip() or str(uuid.uuid4())
+    extra = {k: v for k, v in raw.items() if k not in _KNOWN_JOB_KEYS}
+    return Job(
+        id=jid,
+        name=name,
+        output_dir=str(raw.get("outputDir") or "").strip(),
+        match=MatchSpec(conjunction="all", groups=[]),
+        include_sent=bool(raw.get("includeSent", True)),
+        include_bin=bool(raw.get("includeBin", False)),
+        include_thread=bool(raw.get("includeThread", False)),
+        project_dir=str(raw.get("projectDir") or "").strip(),
+        extra=extra,
+        error=_job_error(raw, path, str(exc)),
+        source=dict(raw),
+    )
+
+
 def load_jobs(path: Path, *, require_output_dir: bool = True) -> JobsFile:
     if not path.is_file():
         return JobsFile(jobs=[])
@@ -182,13 +222,25 @@ def load_jobs(path: Path, *, require_output_dir: bool = True) -> JobsFile:
     raw_jobs = data.get("jobs") or []
     if not isinstance(raw_jobs, list):
         raise ValueError("jobs must be an array")
-    return JobsFile(
-        jobs=[
-            parse_job(j, require_output_dir=require_output_dir)
-            for j in raw_jobs
-            if isinstance(j, dict)
-        ]
-    )
+    jobs: list[Job] = []
+    for raw in raw_jobs:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip() or "Untitled"
+        output = str(raw.get("outputDir") or "").strip()
+        if require_output_dir and not output:
+            raise ValueError(f"job {name!r}: outputDir required")
+        try:
+            jobs.append(
+                parse_job(
+                    raw,
+                    require_output_dir=False,
+                    strict_match=bool(output),
+                )
+            )
+        except ValueError as exc:
+            jobs.append(_invalid_job(raw, path, exc))
+    return JobsFile(jobs=jobs)
 
 
 def save_jobs(jobs: JobsFile, path: Path) -> None:
@@ -312,7 +364,7 @@ def _create_job(req: dict[str, Any], config: Path) -> dict[str, Any]:
     if not isinstance(raw_match, dict):
         return {"ok": False, "error": "match must be an object"}
     try:
-        match = parse_match(raw_match)
+        match = parse_match(raw_match, strict=True)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
     jobs = load_jobs(config)
@@ -375,11 +427,21 @@ def _edit_job(req: dict[str, Any], config: Path) -> dict[str, Any]:
     raw_match = req.get("match")
     if isinstance(raw_match, dict):
         try:
-            target.match = parse_match(raw_match)
+            target.match = parse_match(raw_match, strict=True)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+        target.error = ""
+        target.source = None
     target.include_sent = _opt_bool(req.get("includeSent"), target.include_sent)
     target.include_bin = _opt_bool(req.get("includeBin"), target.include_bin)
     target.include_thread = _opt_bool(req.get("includeThread"), target.include_thread)
+    if target.error and target.source is not None:
+        target.source["name"] = target.name
+        target.source["outputDir"] = target.output_dir
+        target.source["includeSent"] = target.include_sent
+        target.source["includeBin"] = target.include_bin
+        target.source["includeThread"] = target.include_thread
+        if target.project_dir:
+            target.source["projectDir"] = target.project_dir
     save_jobs(jobs, config)
     return {"ok": True, "job": _job_public(target), "config": str(config)}

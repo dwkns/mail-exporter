@@ -133,18 +133,30 @@ struct JobEditorSheet: View {
         }
     }
 
+    private var hasEmptyCondition: Bool {
+        draft.groups.contains { group in
+            group.conditions.contains { $0.isEmptyRow }
+        }
+    }
+
     private var canSave: Bool {
         let nameOK = !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !nameOK || hasEmptyCondition {
+            return false
+        }
         if presentation.isAdd {
-            return nameOK && !JobsStore.isForbiddenOutputDir(projectParent)
+            return !JobsStore.isForbiddenOutputDir(projectParent)
         }
         let folder = store.folderStatus(for: draft)
-        return nameOK && folder.isValidForExport && !JobsStore.isForbiddenOutputDir(draft.outputDir)
+        return folder.isValidForExport && !JobsStore.isForbiddenOutputDir(draft.outputDir)
     }
 
     private var saveHelp: String {
         if draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Name this project"
+        }
+        if hasEmptyCondition {
+            return "Fill in every condition, or remove the empty row"
         }
         if presentation.isAdd {
             if JobsStore.isForbiddenOutputDir(projectParent) {
@@ -162,6 +174,9 @@ struct JobEditorSheet: View {
     }
 
     private func saveDraft() {
+        if hasEmptyCondition {
+            return
+        }
         if presentation.isAdd {
             do {
                 let created = try store.createProject(named: draft.name, parent: projectParent)

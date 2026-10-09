@@ -276,7 +276,16 @@ final class JobsStore: ObservableObject {
                 at: icloudURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try fm.copyItem(at: source, to: icloudURL)
+            // Re-encode so a blank editor row is not copied as `"values": []`.
+            let data = try Data(contentsOf: source)
+            let doc = try JSONDecoder().decode(JobsDocument.self, from: data)
+            let encoded = try JSONEncoder().encode(doc)
+            let obj = try JSONSerialization.jsonObject(with: encoded)
+            let pretty = try JSONSerialization.data(
+                withJSONObject: obj,
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try pretty.write(to: icloudURL, options: .atomic)
             // Stop using the visible Drive folder; leave the file in place so the
             // user can delete it manually if they want.
         } catch {

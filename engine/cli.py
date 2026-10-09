@@ -86,6 +86,15 @@ def run_export(
         if not selected:
             return {"error": f"job name not found: {job_name}", "ok": False}, 1
 
+    if len(selected) == 1 and selected[0].error:
+        bad = selected[0]
+        return {
+            "ok": False,
+            "error": bad.error,
+            "job": bad.name,
+            "jobId": bad.id,
+        }, 1
+
     results = []
     any_fail = False
     t0 = time.perf_counter()
@@ -117,6 +126,19 @@ def run_export(
                     include_bin=include_bin,
                 )
         for job in selected:
+            if job.error:
+                results.append(
+                    {
+                        "jobId": job.id,
+                        "name": job.name,
+                        "ok": False,
+                        "error": job.error,
+                        "line": job.error,
+                        "countMatch": False,
+                    }
+                )
+                any_fail = True
+                continue
             timings = {} if bench else None
             result = run_job(
                 job,

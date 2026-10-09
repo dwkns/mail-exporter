@@ -151,6 +151,8 @@ PYTHONPATH="$(pwd)" .venv/bin/python -m mailexporter_mcp
 | `clear_target` | Delete exported `.eml` files (debug / full redo) |
 | `write_howto` | Refresh `how_to_use.md` in one project, or every project if no job is given |
 
+One bad job does not stop the others. `list_jobs` still lists every job. A saved condition with no value sets that job's `error` field. The text names the job name, the job id, the config file, and the condition (`match.groups[0].conditions[0]: values must be a non-empty array`). `list_messages`, `list_drafts`, and `read_message` still read that folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse an empty condition row.
+
 Typical flow: `list_jobs` → `list_messages` / `read_message` → write a numbered `.md` in `Drafts/` → `compose_draft` → `export_job` later. Matching Markdown moves to `Sent/` once a sent copy is in the export.
 
 `read_message` only reads `.eml` files under a configured job `outputDir`. `clear_target` only clears folders that look like MailExporter exports (marker files present).

@@ -289,6 +289,27 @@ class CriteriaTests(unittest.TestCase):
             )
         )
 
+    def test_strict_empty_values_name_the_condition(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            parse_match(
+                {
+                    "conjunction": "all",
+                    "groups": [
+                        {
+                            "conjunction": "any",
+                            "conditions": [
+                                {"field": "entire", "op": "contains", "values": []}
+                            ],
+                        }
+                    ],
+                },
+                strict=True,
+            )
+        self.assertIn(
+            "match.groups[0].conditions[0]: values must be a non-empty array",
+            str(caught.exception),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,18 @@ struct MatchClause: Identifiable, Equatable, Codable {
         id = UUID()
     }
 
+    /// A row the editor has not filled in. Saving must not write `"values": []`.
+    var isEmptyRow: Bool {
+        if field.lowercased() == "date" {
+            return date.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .isEmpty
+    }
+
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(field, forKey: .field)
@@ -60,7 +72,9 @@ struct MatchClause: Identifiable, Equatable, Codable {
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            try c.encode(parts, forKey: .values)
+            if !parts.isEmpty {
+                try c.encode(parts, forKey: .values)
+            }
         }
     }
 }
@@ -103,7 +117,7 @@ struct MatchGroup: Identifiable, Equatable, Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(conjunction, forKey: .conjunction)
-        try c.encode(conditions, forKey: .conditions)
+        try c.encode(conditions.filter { !$0.isEmptyRow }, forKey: .conditions)
     }
 }
 
@@ -272,7 +286,10 @@ private struct MatchPayload: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(conjunction, forKey: .conjunction)
-        try c.encode(groups, forKey: .groups)
+        let kept = groups.filter { group in
+            group.conditions.contains { !$0.isEmptyRow }
+        }
+        try c.encode(kept, forKey: .groups)
     }
 }
 

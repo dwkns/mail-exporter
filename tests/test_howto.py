@@ -22,6 +22,8 @@ def test_howto_says_export_not_smart_mailbox() -> None:
     assert "comma+space" in text
     assert "silent OK" in text
     assert "Documents/optional.pdf, Documents/other.pdf" in text
+    assert "values must be a non-empty array" in text
+    assert "does not stop the others" in text
 
 
 def test_howto_tells_assistant_to_reread_after_update() -> None:
