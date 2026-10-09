@@ -13,7 +13,11 @@ Cursor and Claude do not open Apple Mail’s private folder. They do not start t
 
 Use the MCP tools. MailExporter.app copies the mail, opens the draft, and saves the job.
 
-When the owner says **send it**, write `Drafts/NNN_who_subject.md` (do not invent content) and call `compose_draft` with that path. That opens a draft. It never sends.
+**Create a reply** (or “write a reply”, or “draft a reply”) means write the Markdown file only. Do not create anything in Mail.
+
+**Create a draft** (or “open a draft”, or “send it”) means create the draft in Mail. Never send.
+
+Write `Drafts/NNN_who_subject.md`. Call `compose_draft` only for a draft.
 
 ## MCP
 
