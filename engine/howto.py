@@ -147,7 +147,11 @@ Best regards
 | `Attach` | One or more files **inside this project**, comma+space separated (`Documents/a.pdf, Documents/b.pdf`). Prefer `Documents/…` from the project root, or a file next to the `.md` in `Drafts/`. `Email/Attachments/<id>/…` is fine. Absolute paths are allowed only under `{project}`. Paths outside the project, `~/…` to elsewhere, and `..` that escapes the project are refused. After the draft opens, MailExporter counts attachments against this list and will not return a silent OK if they differ. |
 | `Format: plain` | Skip Markdown rendering. |
 
-When the owner says “send it”, ask MailExporter to open an Apple Mail draft (never send). Use MCP `compose_draft` with the Markdown path. Do not start the mail program yourself. You can also drop the `.md` on MailExporter.
+**Create a reply** (or “write a reply”, or “draft a reply”) means write the Markdown file only. Do not create anything in Mail.
+
+**Create a draft** (or “open a draft”, or “send it”) means create the draft in Mail. Never send.
+
+Use MCP `compose_draft` with the Markdown path. Do not start the mail program yourself. You can also drop the `.md` on MailExporter.
 
 Dropping a PDF on the Export pane does **not** attach it — put it on `Attach:`. Import new papers into `Documents/` first (do not copy them into `Email/`).
 
@@ -188,7 +192,7 @@ Or Settings → Advanced → Install mail-exporter MCP.
 
 One bad job does not stop the others. If a saved condition has no value, `list_jobs` still returns every job. The bad job has an `error` field. That text names the job name, the job id, the config file, and the condition, for example `match.groups[0].conditions[0]: values must be a non-empty array`. `list_messages`, `list_drafts`, and `read_message` still read that job's folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse to save an empty condition row.
 
-Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{drafts}/NNN_who_subject.md` → `compose_draft` when they say send it → `export_job` again after they send.
+Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{drafts}/NNN_who_subject.md` when they say create a reply → `compose_draft` when they say create a draft → `export_job` again after they send.
 
 ## Ground rules
 

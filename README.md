@@ -76,7 +76,13 @@ python3 -m engine export --json --job-name DHL
 python3 -m engine append-draft Drafts/001_who_subject.md   # developer only — never sends
 ```
 
-Cursor and Claude do not run that command. They call MCP `compose_draft`. MailExporter.app opens the draft. It never sends.
+Cursor and Claude do not run that command.
+
+**Create a reply** (or “write a reply”, or “draft a reply”) means write the Markdown file only. Do not create anything in Mail.
+
+**Create a draft** (or “open a draft”, or “send it”) means create the draft in Mail. Never send.
+
+They call MCP `compose_draft`. MailExporter.app creates the draft.
 
 `--force-full` wipes existing `.eml` files for that job and re-exports.
 
@@ -153,7 +159,7 @@ PYTHONPATH="$(pwd)" .venv/bin/python -m mailexporter_mcp
 
 One bad job does not stop the others. `list_jobs` still lists every job. A saved condition with no value sets that job's `error` field. The text names the job name, the job id, the config file, and the condition (`match.groups[0].conditions[0]: values must be a non-empty array`). `list_messages`, `list_drafts`, and `read_message` still read that folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse an empty condition row.
 
-Typical flow: `list_jobs` → `list_messages` / `read_message` → write a numbered `.md` in `Drafts/` → `compose_draft` → `export_job` later. Matching Markdown moves to `Sent/` once a sent copy is in the export.
+Typical flow: `list_jobs` → `list_messages` / `read_message` → write a numbered `.md` in `Drafts/` when they say create a reply → `compose_draft` when they say create a draft → `export_job` later. Matching Markdown moves to `Sent/` once a sent copy is in the export.
 
 `read_message` only reads `.eml` files under a configured job `outputDir`. `clear_target` only clears folders that look like MailExporter exports (marker files present).
 
