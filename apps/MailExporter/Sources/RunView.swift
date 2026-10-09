@@ -7,6 +7,7 @@ private struct SessionExportResult {
     var detail: String
     var durationSeconds: TimeInterval?
     var newlyWritten: Int? = nil
+    var failed: Bool = false
 }
 
 private enum DurationFormat {
@@ -20,6 +21,34 @@ private enum DurationFormat {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return String(format: "%dm %02ds", m, s)
+    }
+}
+
+private enum ExportFailureCopy {
+    /// One short clause for the job row. The full engine text stays in the help tip.
+    static func reason(_ message: String) -> String {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = text.lowercased()
+        if lower.contains("match.groups must be a non-empty array") {
+            return "No match group"
+        }
+        if lower.contains("values must be a non-empty array") {
+            return "Empty match value"
+        }
+        if lower.contains("full disk access") || lower.contains("operation not permitted") {
+            return "Mail folder is blocked"
+        }
+        if let range = text.range(of: ": ", options: .backwards) {
+            let tail = String(text[range.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !tail.isEmpty, tail.count <= 60, !tail.contains("/") {
+                return tail
+            }
+        }
+        let oneLine = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        if oneLine.isEmpty { return "Unknown error" }
+        if oneLine.count <= 60 { return oneLine }
+        return String(oneLine.prefix(57)) + "…"
     }
 }
 
@@ -408,12 +437,13 @@ struct RunView: View {
         let started = Date()
         let jobIDs = targetJobs.map(\.id)
         DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                var pieces: [EngineResult] = []
-                for id in jobIDs {
-                    DispatchQueue.main.sync {
-                        runningJobID = id
-                    }
+            var pieces: [EngineResult] = []
+            var failures: [(id: String, message: String)] = []
+            for id in jobIDs {
+                DispatchQueue.main.sync {
+                    runningJobID = id
+                }
+                do {
                     let piece = try EngineSession.shared.export(
                         projectRoot: root,
                         configPath: config,
@@ -426,32 +456,50 @@ struct RunView: View {
                         applyPartial(piece, jobID: id)
                         lastDurations[id] = pieceDuration
                     }
-                }
-                let duration = Date().timeIntervalSince(started)
-                let combined = Self.combine(pieces)
-                DispatchQueue.main.async {
-                    stopTicker()
-                    busy = false
-                    runningJobID = nil
-                    store.needsFullDiskAccess = false
-                    recordDuration(duration, jobID: jobID)
-                    applyResult(combined, focusedJobID: jobID, duration: duration)
-                    store.reload()
-                    notify("\(combined.line) · \(DurationFormat.short(duration))")
-                }
-            } catch {
-                let duration = Date().timeIntervalSince(started)
-                DispatchQueue.main.async {
-                    stopTicker()
-                    busy = false
-                    runningJobID = nil
+                } catch {
                     let message = error.localizedDescription
-                    if MailAccessProbe.looksLikeFullDiskDenial(message) {
-                        store.flagFullDiskAccessRequired()
+                    let pieceDuration = Date().timeIntervalSince(started)
+                    failures.append((id, message))
+                    let blocked = MailAccessProbe.looksLikeFullDiskDenial(message)
+                    DispatchQueue.main.async {
+                        if blocked {
+                            store.flagFullDiskAccessRequired()
+                        }
+                        markFailed(jobID: id, message: message, duration: pieceDuration)
                     }
-                    markFailed(jobID: runningJobID ?? jobID, message: message, duration: duration)
-                    store.status = message
-                    notify(message)
+                    // One bad job must not paint the others failed.
+                    // A blocked Mail folder fails every later job the same way.
+                    if blocked {
+                        break
+                    }
+                }
+            }
+            let duration = Date().timeIntervalSince(started)
+            let combined = pieces.isEmpty ? nil : Self.combine(pieces)
+            DispatchQueue.main.async {
+                stopTicker()
+                busy = false
+                runningJobID = nil
+                let blocked = failures.contains {
+                    MailAccessProbe.looksLikeFullDiskDenial($0.message)
+                }
+                if !blocked {
+                    store.needsFullDiskAccess = false
+                }
+                recordDuration(duration, jobID: jobID)
+                if let combined {
+                    applyResult(combined, focusedJobID: jobID, duration: duration)
+                }
+                store.reload()
+                if failures.isEmpty, let combined {
+                    notify("\(combined.line) · \(DurationFormat.short(duration))")
+                } else {
+                    let status = failures.map { item in
+                        let name = store.jobs.first(where: { $0.id == item.id })?.name ?? "Job"
+                        return "\(name): \(ExportFailureCopy.reason(item.message))"
+                    }.joined(separator: " — ")
+                    store.status = status
+                    notify(status)
                 }
             }
         }
@@ -553,20 +601,14 @@ struct RunView: View {
         }
     }
 
-    private func markFailed(jobID: String?, message: String, duration: TimeInterval) {
-        let targets: [String]
-        if let jobID {
-            targets = [jobID]
-        } else {
-            targets = store.jobs.map(\.id)
-        }
-        for id in targets {
-            sessionResults[id] = SessionExportResult(
-                summary: "Export failed · \(DurationFormat.short(duration))",
-                detail: message,
-                durationSeconds: duration
-            )
-        }
+    private func markFailed(jobID: String, message: String, duration: TimeInterval) {
+        let reason = ExportFailureCopy.reason(message)
+        sessionResults[jobID] = SessionExportResult(
+            summary: "Export failed · \(reason)",
+            detail: message,
+            durationSeconds: duration,
+            failed: true
+        )
     }
 
     private func applyExternalExport(_ info: [AnyHashable: Any]?) {
@@ -726,6 +768,7 @@ private struct ExportJobRow: View {
 
     private var statusColor: Color {
         if isRunningThis { return .secondary }
+        if result?.failed == true { return .red }
         if isNewCount { return Color(nsColor: .systemGreen) }
         switch folderStatus {
         case .exists, .unset:
@@ -792,6 +835,7 @@ private struct ExportJobRow: View {
                                 .foregroundStyle(statusColor)
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
+                                .help(result?.failed == true ? (result?.detail ?? statusText) : statusText)
                         }
 
                         if debugMode, result != nil, !isRunningThis {
