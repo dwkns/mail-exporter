@@ -2,10 +2,26 @@ import AppKit
 import Foundation
 import UserNotifications
 
+struct ComposeFileOutcome: Equatable, Identifiable {
+    let id: UUID
+    let name: String
+    let ok: Bool
+    /// Raw engine text for this file. The drop zone turns a failure into the red banner.
+    let detail: String
+
+    init(name: String, ok: Bool, detail: String) {
+        self.id = UUID()
+        self.name = name
+        self.ok = ok
+        self.detail = detail
+    }
+}
+
 struct ComposeResult: Equatable {
     var ok: Bool
     var summary: String
     var detail: String
+    var files: [ComposeFileOutcome] = []
 }
 
 enum AttachCountCheck {
@@ -135,14 +151,23 @@ enum ComposeBridge {
             )
         }
         var lines: [String] = []
+        var files: [ComposeFileOutcome] = []
         var ok = true
         for file in mdFiles {
             let payload = HiddenDraft.run(path: file.path, subjectOverride: "", method: "auto")
             let text = (payload["result"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let err = (payload["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let line = [text, err].filter { !$0.isEmpty }.joined(separator: " ")
+            let fileOK = (payload["ok"] as? Bool) == true
             if !line.isEmpty { lines.append(line) }
-            if (payload["ok"] as? Bool) != true { ok = false }
+            if !fileOK { ok = false }
+            files.append(
+                ComposeFileOutcome(
+                    name: file.lastPathComponent,
+                    ok: fileOK,
+                    detail: line
+                )
+            )
         }
         let detail = lines.joined(separator: "\n")
         if !ok {
@@ -153,13 +178,13 @@ enum ComposeBridge {
             } else {
                 summary = "Compose failed"
             }
-            return ComposeResult(ok: false, summary: summary, detail: detail)
+            return ComposeResult(ok: false, summary: summary, detail: detail, files: files)
         }
         let summary = mdFiles.count == 1
             ? "Draft opened in Mail"
             : "\(mdFiles.count) drafts opened in Mail"
         let shown = detail.isEmpty ? "Opened \(mdFiles.count) draft(s) in Mail." : detail
-        return ComposeResult(ok: true, summary: summary, detail: shown)
+        return ComposeResult(ok: true, summary: summary, detail: shown, files: files)
     }
 }
 

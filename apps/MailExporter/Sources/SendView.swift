@@ -8,33 +8,27 @@ struct DraftDropZone: View {
     @ObservedObject private var runner = ComposeRunner.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isTargeted = false
-    @State private var dismissedGeneration: UInt = 0
+    @State private var dismissedOutcomeIDs: Set<UUID> = []
     @State private var bannerBright = false
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .none
-        f.timeStyle = .medium
-        return f
-    }()
+    @State private var earlierExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             dropZone
-                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: failureText == nil ? 120 : 220)
+                .frame(maxWidth: .infinity, minHeight: 96, maxHeight: inbox.currentBatch == nil ? 120 : 360)
 
-            if let lastResult = runner.lastResult, lastResult.ok {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(lastResult.summary)
-                        .font(.callout.weight(.medium))
-                    Text(lastResult.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                        .textSelection(.enabled)
+            if !inbox.earlierBatches.isEmpty {
+                DisclosureGroup(isExpanded: $earlierExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(inbox.earlierBatches) { batch in
+                            earlierBatch(batch)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("Earlier drops")
+                        .font(.caption.weight(.semibold))
                 }
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -43,8 +37,11 @@ struct DraftDropZone: View {
         .onChange(of: runner.busy) { isBusy in
             if !isBusy { runner.drainInbox() }
         }
-        .onChange(of: runner.resultGeneration) { generation in
-            guard failureText != nil, dismissedGeneration != generation else { return }
+        .onChange(of: inbox.currentBatch?.id) { _ in
+            dismissedOutcomeIDs = []
+        }
+        .onChange(of: runner.resultGeneration) { _ in
+            guard hasVisibleFailure else { return }
             bannerBright = true
             DispatchQueue.main.async {
                 withAnimation(.easeOut(duration: 0.55)) {
@@ -54,23 +51,37 @@ struct DraftDropZone: View {
         }
     }
 
-    private var failureText: String? {
-        guard let result = runner.lastResult, !result.ok else { return nil }
-        guard dismissedGeneration != runner.resultGeneration else { return nil }
-        return ComposeFailureCopy.banner(summary: result.summary, detail: result.detail)
+    private var successCaption: String {
+        if let result = runner.lastResult, result.ok, !result.summary.isEmpty {
+            return result.summary
+        }
+        return "Draft opened in Mail"
     }
 
-    private var failureBanner: some View {
-        HStack(alignment: .top, spacing: 8) {
+    private var hasVisibleFailure: Bool {
+        guard let batch = inbox.currentBatch else { return false }
+        return zip(batch.files, batch.outcomes).contains { _, outcome in
+            !outcome.ok && !dismissedOutcomeIDs.contains(outcome.id)
+        }
+    }
+
+    private func bannerText(for outcome: ComposeFileOutcome) -> String {
+        let sentence = ComposeFailureCopy.banner(summary: "Compose failed", detail: outcome.detail)
+        return "\(outcome.name): \(sentence)"
+    }
+
+    private func fileBanner(_ outcome: ComposeFileOutcome) -> some View {
+        let text = bannerText(for: outcome)
+        return HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(bannerBright ? Color.white : Color.red)
-            Text(failureText ?? "")
+            Text(text)
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(bannerBright ? Color.white : Color.red)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
-                dismissedGeneration = runner.resultGeneration
+                dismissedOutcomeIDs.insert(outcome.id)
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
@@ -86,33 +97,26 @@ struct DraftDropZone: View {
                 .fill(Color.red.opacity(bannerBright ? 0.95 : 0.16))
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(failureText ?? "Draft failed")
+        .accessibilityLabel(text)
     }
 
-    private var recentDropsPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Recent files")
-                .font(.caption.weight(.semibold))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(inbox.recentDrops.prefix(6)) { item in
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(item.name)
-                                .font(.caption)
-                                .lineLimit(1)
-                            Text(Self.timeFormatter.string(from: item.droppedAt))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+    private func earlierBatch(_ batch: DropBatch) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(batch.files) { file in
+                Text(file.name)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            ForEach(Array(batch.outcomes.enumerated()), id: \.element.id) { _, outcome in
+                if !outcome.ok {
+                    Text(bannerText(for: outcome))
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var dropZone: some View {
@@ -137,44 +141,76 @@ struct DraftDropZone: View {
 
     private var wellContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 14) {
-            dropMessageIcon
-            VStack(alignment: .leading, spacing: 2) {
-                Text(runner.busy ? "Working…" : "Drop .md email files here")
-                    .font(.headline)
-                Text("Opens an Apple Mail draft — never sends")
+            HStack(alignment: .top, spacing: 14) {
+                dropMessageIcon
+                VStack(alignment: .leading, spacing: 6) {
+                    if let batch = inbox.currentBatch {
+                        currentDrop(batch)
+                    } else {
+                        Text(runner.busy ? "Working…" : "Drop .md email files here")
+                            .font(.headline)
+                        Text("Opens an Apple Mail draft — never sends")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Button("Choose Files") {
+                        chooseFiles()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(runner.busy)
+                    .help("Choose Markdown email files")
+                    .accessibilityLabel("Choose Files")
+                    if inbox.currentBatch != nil {
+                        Button("Clear") {
+                            dismissedOutcomeIDs.removeAll()
+                            inbox.clearCurrentDisplay()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityLabel("Clear")
+                    }
+                    if runner.busy {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Opening drafts…")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+        }
+    }
+
+    private func currentDrop(_ batch: DropBatch) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(batch.files.enumerated()), id: \.element.id) { index, file in
+                Text(file.name)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(2)
+                if index < batch.outcomes.count {
+                    let outcome = batch.outcomes[index]
+                    if !outcome.ok && !dismissedOutcomeIDs.contains(outcome.id) {
+                        fileBanner(outcome)
+                    }
+                }
+            }
+            if batch.outcomes.isEmpty && runner.busy {
+                Text("Working…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if !batch.outcomes.isEmpty && batch.outcomes.allSatisfy(\.ok) {
+                Text(successCaption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 6) {
-            Button("Choose Files") {
-                chooseFiles()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(runner.busy)
-            .help("Choose Markdown email files")
-            .accessibilityLabel("Choose Files")
-                if runner.busy {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Opening drafts…")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
-                }
-            }
-            if !inbox.recentDrops.isEmpty {
-                recentDropsPanel
-                    .frame(width: 196)
-            }
         }
-        if failureText != nil {
-            failureBanner
-        }
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var dropMessageIcon: some View {
@@ -212,7 +248,7 @@ struct DraftDropZone: View {
             panel.directoryURL = drafts
         }
         if panel.runModal() == .OK {
-            runner.process(urls: panel.urls, alreadyRecorded: false)
+            runner.process(urls: panel.urls)
         }
     }
 
@@ -257,7 +293,7 @@ struct DraftDropZone: View {
             }
         }
         group.notify(queue: .main) {
-            runner.process(urls: urls, alreadyRecorded: false)
+            runner.process(urls: urls)
         }
         return true
     }

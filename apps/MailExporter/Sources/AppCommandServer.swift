@@ -103,7 +103,24 @@ enum AppCommandServer {
         if !path.isEmpty {
             fileURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
             if !FileManager.default.fileExists(atPath: fileURL.path) {
-                return jsonLine(["ok": false, "error": "file not found: \(fileURL.path)"])
+                let detail = "file not found: \(fileURL.path)"
+                let outcome = ComposeFileOutcome(
+                    name: fileURL.lastPathComponent,
+                    ok: false,
+                    detail: detail
+                )
+                let result = ComposeResult(
+                    ok: false,
+                    summary: "Compose failed",
+                    detail: detail,
+                    files: [outcome]
+                )
+                DispatchQueue.main.async {
+                    let batchId = ComposeInbox.shared.beginBatch([fileURL])
+                    ComposeInbox.shared.apply(batchId: batchId, outcomes: [outcome])
+                    ComposeRunner.shared.noteExternal(result)
+                }
+                return jsonLine(["ok": false, "error": detail])
             }
         } else if !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -127,10 +144,18 @@ enum AppCommandServer {
         let err = (payload["error"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let detail = [text, err].filter { !$0.isEmpty }.joined(separator: " ")
         let summary = text.isEmpty ? (ok ? "Draft ready" : "Compose failed") : text
-        DraftNotifier.announce(
-            ComposeResult(ok: ok, summary: summary, detail: detail),
-            draftCount: 1
+        let outcome = ComposeFileOutcome(
+            name: fileURL.lastPathComponent,
+            ok: ok,
+            detail: detail
         )
+        let result = ComposeResult(ok: ok, summary: summary, detail: detail, files: [outcome])
+        DraftNotifier.announce(result, draftCount: 1)
+        DispatchQueue.main.async {
+            let batchId = ComposeInbox.shared.beginBatch([fileURL])
+            ComposeInbox.shared.apply(batchId: batchId, outcomes: [outcome])
+            ComposeRunner.shared.noteExternal(result)
+        }
         return jsonLine(payload)
     }
 
