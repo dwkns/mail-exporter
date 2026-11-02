@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -332,6 +333,38 @@ def _job_public(job: Job) -> dict[str, Any]:
     return row
 
 
+def write_match_rule_log(job: Job, before: dict[str, Any], after: dict[str, Any]) -> str | None:
+    """Write one match-rule change under the job Email/logs/ folder.
+
+    Does not modify or delete Email/Drafts or Email/Sent.
+    """
+    if before == after:
+        return None
+    raw = str(job.output_dir or "").strip()
+    if not raw:
+        return None
+    logs = Path(raw).expanduser() / "logs"
+    parts = {part.lower() for part in logs.parts}
+    if "drafts" in parts or "sent" in parts:
+        raise ValueError("refusing to write a match log inside Drafts or Sent")
+    logs.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = logs / f"match-rules-{stamp}.json"
+    n = 0
+    while path.exists():
+        n += 1
+        path = logs / f"match-rules-{stamp}-{n}.json"
+    record = {
+        "job": job.name,
+        "jobId": job.id,
+        "changedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "before": before,
+        "after": after,
+    }
+    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    return str(path)
+
+
 def apply_job_command(req: dict[str, Any], config: Path) -> dict[str, Any]:
     """Create or change a job. Callers outside the app must ask the app to run this."""
     cmd = str(req.get("cmd") or "")
@@ -425,13 +458,17 @@ def _edit_job(req: dict[str, Any], config: Path) -> dict[str, Any]:
         target.output_dir = new_dir
         target.project_dir = str(resolved_project_root(target.output_dir))
     raw_match = req.get("match")
+    before_match = target.match.to_dict()
+    match_changed = False
     if isinstance(raw_match, dict):
         try:
-            target.match = parse_match(raw_match, strict=True)
+            parsed_match = parse_match(raw_match, strict=True)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+        target.match = parsed_match
         target.error = ""
         target.source = None
+        match_changed = target.match.to_dict() != before_match
     target.include_sent = _opt_bool(req.get("includeSent"), target.include_sent)
     target.include_bin = _opt_bool(req.get("includeBin"), target.include_bin)
     target.include_thread = _opt_bool(req.get("includeThread"), target.include_thread)
@@ -443,5 +480,15 @@ def _edit_job(req: dict[str, Any], config: Path) -> dict[str, Any]:
         target.source["includeThread"] = target.include_thread
         if target.project_dir:
             target.source["projectDir"] = target.project_dir
+    if match_changed:
+        logs = Path(target.output_dir).expanduser() / "logs"
+        parts = {part.lower() for part in logs.parts}
+        if "drafts" in parts or "sent" in parts:
+            return {"ok": False, "error": "refusing to write a match log inside Drafts or Sent"}
     save_jobs(jobs, config)
-    return {"ok": True, "job": _job_public(target), "config": str(config)}
+    result: dict[str, Any] = {"ok": True, "job": _job_public(target), "config": str(config)}
+    if match_changed:
+        log_path = write_match_rule_log(target, before_match, target.match.to_dict())
+        if log_path:
+            result["log"] = log_path
+    return result

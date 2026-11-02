@@ -17,7 +17,9 @@ When the owner says **send it**, write `Drafts/NNN_who_subject.md` (do not inven
 
 ## MCP
 
-Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`, `list_messages` (From/Subject/Date/Message-ID), `read_message`, `list_drafts`, `create_job`, `edit_job`, `compose_draft`, `check_matches`, `export_job`, `clear_target`, `write_howto`.
+Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`, `list_messages` (From/Subject/Date/Message-ID), `read_message`, `list_drafts`, `create_job`, `edit_job`, `list_match_rules`, `edit_match_rules`, `compose_draft`, `check_matches`, `export_job`, `clear_target`, `write_howto`.
+
+`list_match_rules` shows one job's match rules, or every job when you omit the name. `edit_match_rules` replaces those rules. Each change is written to that job's `Email/logs/match-rules-<UTC time>.json`. Do not use `force_full`. Do not change `Email/Drafts` or `Email/Sent`. Never send mail.
 
 `export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
 
@@ -44,6 +46,7 @@ When the owner points you at a project folder (“read this folder”):
     Attachments/<id>/
     Drafts/
     Sent/
+    logs/
   Documents/
   Notes/
   _archive/

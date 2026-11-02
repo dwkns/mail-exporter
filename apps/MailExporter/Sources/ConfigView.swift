@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum JobEditorPresentation: Identifiable, Hashable {
     case add
@@ -202,8 +203,56 @@ struct JobEditorSheet: View {
             }
             return
         }
+        if let previous = store.jobs.first(where: { $0.id == draft.id }) {
+            writeMatchChangeLog(previous: previous)
+        }
         store.upsertJob(draft)
         dismiss()
+    }
+
+    /// Save one match-rule change under Email/logs/. Do not touch Drafts or Sent.
+    private func writeMatchChangeLog(previous: ExportJob) {
+        guard let beforeData = try? previous.matchRulesJSON(),
+              let afterData = try? draft.matchRulesJSON(),
+              beforeData != afterData,
+              let beforeObj = try? JSONSerialization.jsonObject(with: beforeData),
+              let afterObj = try? JSONSerialization.jsonObject(with: afterData) else { return }
+        let output = draft.outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !output.isEmpty else { return }
+        let email = URL(fileURLWithPath: (output as NSString).expandingTildeInPath, isDirectory: true)
+        let logs = email.appendingPathComponent("logs", isDirectory: true)
+        let lower = logs.path.lowercased()
+        if lower.contains("/drafts/") || lower.contains("/sent/") { return }
+        let stampFmt = DateFormatter()
+        stampFmt.locale = Locale(identifier: "en_US_POSIX")
+        stampFmt.timeZone = TimeZone(secondsFromGMT: 0)
+        stampFmt.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        let stamp = stampFmt.string(from: Date())
+        let iso = ISO8601DateFormatter()
+        iso.timeZone = TimeZone(secondsFromGMT: 0)
+        let record: [String: Any] = [
+            "job": draft.name,
+            "jobId": draft.id,
+            "changedAt": iso.string(from: Date()),
+            "before": beforeObj,
+            "after": afterObj,
+        ]
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: record,
+            options: [.prettyPrinted, .sortedKeys]
+        ) else { return }
+        do {
+            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+            var url = logs.appendingPathComponent("match-rules-\(stamp).json")
+            var n = 0
+            while FileManager.default.fileExists(atPath: url.path) {
+                n += 1
+                url = logs.appendingPathComponent("match-rules-\(stamp)-\(n).json")
+            }
+            try data.write(to: url, options: .atomic)
+        } catch {
+            return
+        }
     }
 
     private func browseParent() {
@@ -371,6 +420,27 @@ struct SmartMailboxEditor: View {
     var onBrowse: () -> Void
     var onBrowseParent: () -> Void
 
+    private func exportCurrentRules() {
+        do {
+            let data = try job.matchRulesJSON()
+            let panel = NSSavePanel()
+            panel.title = "Export rules"
+            panel.prompt = "Export"
+            panel.nameFieldStringValue = "match-rules.json"
+            panel.allowedContentTypes = [.json]
+            panel.canCreateDirectories = true
+            if panel.runModal() == .OK, let url = panel.url {
+                try data.write(to: url, options: .atomic)
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn’t export rules"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     private var createdProjectPath: String {
         let parent = (projectParent as NSString).expandingTildeInPath
         let name = ProjectLayout.sanitizedFolderName(job.name)
@@ -483,6 +553,11 @@ struct SmartMailboxEditor: View {
                 .frame(width: 72)
                 Text("of the following groups:")
                 Spacer(minLength: 0)
+                Button("Export rules") {
+                    exportCurrentRules()
+                }
+                .buttonStyle(.borderless)
+                .help("Save the current match rules as JSON")
                 Button {
                     job.groups.append(MatchGroup(conjunction: "any"))
                 } label: {
