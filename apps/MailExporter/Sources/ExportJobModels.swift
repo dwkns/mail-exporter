@@ -225,6 +225,14 @@ struct ExportJob: Identifiable, Equatable, Codable {
         guard !raw.isEmpty else { return }
         projectDir = ProjectLayout.inferProjectRoot(from: raw)
     }
+
+    /// Current match rules as pretty JSON. Empty condition rows are omitted.
+    func matchRulesJSON() throws -> Data {
+        let payload = MatchPayload(conjunction: conjunction, groups: groups)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(payload)
+    }
 }
 
 private struct MatchPayload: Codable {

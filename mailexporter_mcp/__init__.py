@@ -618,6 +618,73 @@ def list_drafts(job_name: str = "", job_id: str = "") -> str:
     )
 
 
+def _match_row(job: Job) -> dict[str, Any]:
+    match: Any = job.match.to_dict()
+    source = getattr(job, "source", None)
+    err = str(getattr(job, "error", "") or "")
+    if err and isinstance(source, dict) and isinstance(source.get("match"), dict):
+        match = source["match"]
+    row: dict[str, Any] = {
+        "id": job.id,
+        "name": job.name,
+        "outputDir": job.output_dir,
+        "match": match,
+    }
+    if err:
+        row["error"] = err
+    return row
+
+
+@mcp.tool()
+def list_match_rules(job_name: str = "", job_id: str = "") -> str:
+    """List match rules for one job, or for every job when no name or id is given.
+
+    Does not export mail and does not send mail.
+    """
+    if not job_name.strip() and not job_id.strip():
+        jobs = load_jobs(_config_path()).jobs
+        return json.dumps({"jobs": [_match_row(j) for j in jobs]}, indent=2)
+    try:
+        job = _find_job(job_id=job_id or None, job_name=job_name or None)
+    except ValueError as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+    return json.dumps(_match_row(job), indent=2)
+
+
+@mcp.tool()
+def edit_match_rules(job_name: str = "", job_id: str = "", match_json: str = "") -> str:
+    """Replace one job's match rules. Each change is written to Email/logs/.
+
+    ``match_json`` is a MatchSpec object. This does not export, does not send,
+    and does not pass ``force_full``. It does not modify Email/Drafts or Email/Sent.
+    An empty condition row is refused.
+    """
+    if not job_name.strip() and not job_id.strip():
+        return json.dumps({"ok": False, "error": "provide job_name or job_id"})
+    if not match_json.strip():
+        return json.dumps({"ok": False, "error": "match_json required"})
+    try:
+        parsed = json.loads(match_json)
+    except json.JSONDecodeError as exc:
+        return json.dumps({"ok": False, "error": f"match_json: {exc}"})
+    if not isinstance(parsed, dict):
+        return json.dumps({"ok": False, "error": "match_json must be an object"})
+    from engine.criteria import parse_match
+
+    try:
+        parse_match(parsed, strict=True)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)})
+    req: dict[str, Any] = {
+        "cmd": "edit-job",
+        "config": str(_config_path()),
+        "jobName": job_name,
+        "jobId": job_id,
+        "match": parsed,
+    }
+    return json.dumps(_ask_app(req), indent=2)
+
+
 @mcp.tool()
 def create_job(
     name: str,

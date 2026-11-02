@@ -291,6 +291,92 @@ def test_mcp_create_edit_and_list_drafts(
     assert relocated["job"]["projectDir"] == str(moved.parent)
 
 
+def test_mcp_list_and_edit_match_rules(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = tmp_path / "jobs.json"
+    monkeypatch.setenv("MAILEXPORTER_CONFIG", str(config))
+    import importlib
+    import mailexporter_mcp as m
+    from engine.jobs import apply_job_command
+
+    importlib.reload(m)
+
+    def _local_ask(req):
+        assert "forceFull" not in req
+        assert req.get("cmd") != "export"
+        return apply_job_command(req, config)
+
+    monkeypatch.setattr(m, "_ask_app", _local_ask)
+    email = tmp_path / "Case" / "Email"
+    drafts = email / "Drafts"
+    sent = email / "Sent"
+    drafts.mkdir(parents=True)
+    sent.mkdir()
+    (drafts / "001_a.md").write_text("keep\n", encoding="utf-8")
+    (sent / "001_a.md").write_text("keep\n", encoding="utf-8")
+    created = json.loads(
+        m.create_job(
+            name="Invoices",
+            output_dir=str(email),
+            match_json=json.dumps(
+                {
+                    "conjunction": "any",
+                    "conditions": [
+                        {"field": "subject", "op": "contains", "values": ["invoice"]}
+                    ],
+                }
+            ),
+        )
+    )
+    assert created["ok"] is True
+
+    listed = json.loads(m.list_match_rules(job_name="Invoices"))
+    assert listed["match"]["groups"][0]["conditions"][0]["values"] == ["invoice"]
+
+    new_match = {
+        "conjunction": "all",
+        "groups": [
+            {
+                "conjunction": "any",
+                "conditions": [
+                    {"field": "from", "op": "contains", "values": ["billing@example.com"]}
+                ],
+            }
+        ],
+    }
+    edited = json.loads(
+        m.edit_match_rules(job_name="Invoices", match_json=json.dumps(new_match))
+    )
+    assert edited["ok"] is True
+    log = Path(edited["log"])
+    assert log.parent == email / "logs"
+    assert log.name.startswith("match-rules-")
+    body = json.loads(log.read_text(encoding="utf-8"))
+    assert body["after"]["groups"][0]["conditions"][0]["field"] == "from"
+    assert (drafts / "001_a.md").read_text(encoding="utf-8") == "keep\n"
+    assert (sent / "001_a.md").read_text(encoding="utf-8") == "keep\n"
+
+    again = json.loads(m.list_match_rules(job_name="Invoices"))
+    assert again["match"]["groups"][0]["conditions"][0]["values"] == ["billing@example.com"]
+
+    refused = json.loads(
+        m.edit_match_rules(
+            job_name="Invoices",
+            match_json=json.dumps(
+                {
+                    "conjunction": "any",
+                    "conditions": [
+                        {"field": "subject", "op": "contains", "values": []}
+                    ],
+                }
+            ),
+        )
+    )
+    assert refused["ok"] is False
+    assert list((email / "logs").glob("match-rules-*.json")) == [log]
+
+
 def test_mcp_export_job_mocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from engine.jobs import JobsFile, save_jobs, seed_dhl_job
 

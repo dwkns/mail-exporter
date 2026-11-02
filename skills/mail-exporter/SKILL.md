@@ -21,11 +21,13 @@ Write `Drafts/NNN_who_subject.md`. Call `compose_draft` only for a draft.
 
 ## MCP
 
-Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`, `list_messages` (From/Subject/Date/Message-ID), `read_message`, `list_drafts`, `create_job`, `edit_job`, `compose_draft`, `check_matches`, `export_job`, `clear_target`, `write_howto`.
+Local stdio only. Installed helper: `MailExporterEngine mcp`. Tools: `list_jobs`, `list_messages` (From/Subject/Date/Message-ID), `read_message`, `list_drafts`, `create_job`, `edit_job`, `list_match_rules`, `edit_match_rules`, `compose_draft`, `check_matches`, `export_job`, `clear_target`, `write_howto`.
 
-`export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument.
+`list_match_rules` shows one job's match rules, or every job when you omit the name. `edit_match_rules` replaces those rules. Each change is written to that job's `Email/logs/match-rules-<UTC time>.json`. Do not use `force_full`. Do not change `Email/Drafts` or `Email/Sent`. Never send mail.
 
-One bad job does not stop the others. `list_jobs` still lists every job. A job whose saved condition has no value includes an `error` field. That text names the job name, the job id, the config file, and the condition (`match.groups[0].conditions[0]: values must be a non-empty array`). `list_messages`, `list_drafts`, and `read_message` still read that folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse an empty condition row.
+`export_job` / `check_matches` take `job_name` (or `job_id`). `force_full` is optional and may be omitted. Do not pass an `engine` argument. Do not pass `force_full` to `edit_match_rules`.
+
+One bad job does not stop the others. `list_jobs` still lists every job. A job whose saved condition has no value includes an `error` field. That text names the job name, the job id, the config file, and the condition (`match.groups[0].conditions[0]: values must be a non-empty array`). `list_messages`, `list_drafts`, and `read_message` still read that folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job`, `edit_job`, and `edit_match_rules` refuse an empty condition row.
 
 `read_message` / `clear_target` are sandboxed to configured export folders. `Attach:` paths must stay inside the **project folder**. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space. After the draft opens, `compose_draft` reports attached vs requested and fails if they differ. Do not put a job folder inside Apple Mail’s private folder.
 
@@ -50,6 +52,7 @@ When the owner points you at a project folder (“read this folder”):
     Attachments/<id>/
     Drafts/
     Sent/
+    logs/
   Documents/
   Notes/
   _archive/

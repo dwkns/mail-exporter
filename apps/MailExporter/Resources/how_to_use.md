@@ -32,6 +32,7 @@ Export job: **{{MAILBOX_NAME}}**
     Attachments/<id>/     files extracted from those emails
     Drafts/               outgoing Markdown, not yet known sent
     Sent/                 that Markdown after a matching sent `.eml`
+    logs/                 one JSON file each time match rules change
   Documents/              papers the owner keeps (policy, invoice, letter)
   Notes/                  timeline, call log, analysis
   _archive/               superseded packs
@@ -130,10 +131,12 @@ Or Settings → Advanced → Install mail-exporter MCP.
 | `read_message` | Headers + body + **messageId**. |
 | `list_drafts` | Inventory `Drafts/` and `Sent/` Markdown. |
 | `create_job` / `edit_job` | Set up or change an export (never-send). |
+| `list_match_rules` | Show match rules for one job, or every job when no name is given. |
+| `edit_match_rules` | Change match rules. Each change is written to `Email/logs/`. Do not send mail. Do not use `force_full`. |
 | `compose_draft` | Open Mail draft/reply from Markdown in `Drafts/`. |
 | `check_matches` / `export_job` | Refresh from Apple Mail. Pass `job_name` only; omit `job_id` / `force_full` unless needed. |
 
-One bad job does not stop the others. If a saved condition has no value, `list_jobs` still returns every job. The bad job has an `error` field. That text names the job name, the job id, the config file, and the condition, for example `match.groups[0].conditions[0]: values must be a non-empty array`. `list_messages`, `list_drafts`, and `read_message` still read that job's folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job` and `edit_job` refuse to save an empty condition row.
+One bad job does not stop the others. If a saved condition has no value, `list_jobs` still returns every job. The bad job has an `error` field. That text names the job name, the job id, the config file, and the condition, for example `match.groups[0].conditions[0]: values must be a non-empty array`. `list_messages`, `list_drafts`, and `read_message` still read that job's folder. `check_matches` and `export_job` on that job return the error and do not export. `create_job`, `edit_job`, and `edit_match_rules` refuse to save an empty condition row. On the edit-rules page, **Export rules** saves the current match rules as JSON. That export does not change `Drafts/` or `Sent/`.
 
 Typical flow after the first read: `export_job` if mail looks stale → `list_messages` / `read_message` → write `{{OUTPUT_DIR}}/Drafts/NNN_who_subject.md` when they say create a reply → `compose_draft` when they say create a draft → `export_job` again after they send.
 
