@@ -64,4 +64,4 @@ After the owner sends, the next export can move matching Markdown from `Drafts/`
 
 ## Permissions
 
-Full Disk Access is only for MailExporter. Cursor and Claude do not need it. Automation → Mail is for drafts. MailExporter creates the draft in the background. Upload uses IMAP when the account is iCloud, the keychain item `MailExporter iCloud IMAP` exists, and TLS succeeds within 3 seconds. Otherwise it imports a mailbox and moves the message into Drafts. Accessibility is not required for drafts.
+Full Disk Access is only for MailExporter. Cursor and Claude do not need it. Automation → Mail is for drafts. MailExporter creates the draft in the background. Upload uses IMAP for iCloud (`imap.mail.me.com`, keychain item `MailExporter iCloud IMAP`) and for Gmail (`imap.gmail.com`, keychain item `MailExporter Gmail IMAP`) when that item exists and TLS succeeds within 3 seconds. If the item is missing, TLS fails within 3 seconds, or the account is neither iCloud nor Gmail, MailExporter imports a mailbox and moves the message into Drafts. That import leaves an empty Import or Import-N mailbox until the user deletes it in Mail. Accessibility is not required for drafts.

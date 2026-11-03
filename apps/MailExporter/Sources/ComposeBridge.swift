@@ -117,11 +117,14 @@ enum ComposeFailureCopy {
                 "Drop the file again.",
             ]
         }
-        if blob.contains("security add-generic-password") || blob.contains("mailexporter icloud imap") {
+        if blob.contains("security add-generic-password") || blob.contains("mailexporter icloud imap") || blob.contains("mailexporter gmail imap") {
+            let gmail = blob.contains("mailexporter gmail imap")
             return [
                 head,
-                "No password is stored for this iCloud account.",
-                "Add a keychain item named MailExporter iCloud IMAP for the From address.",
+                gmail ? "No password is stored for this Gmail account." : "No password is stored for this iCloud account.",
+                gmail
+                    ? "Add a keychain item named MailExporter Gmail IMAP for the From address."
+                    : "Add a keychain item named MailExporter iCloud IMAP for the From address.",
                 "Drop the file again.",
             ]
         }
@@ -187,7 +190,7 @@ enum ComposeFailureCopy {
 }
 
 enum ComposeBridge {
-    /// Open drafts in the background. Upload when iCloud IMAP is ready. Import otherwise.
+    /// Open drafts in the background. Upload when iCloud or Gmail IMAP is ready. Import otherwise.
     static func compose(markdownFiles: [URL]) throws -> ComposeResult {
         let mdFiles = markdownFiles.filter { url in
             let ext = url.pathExtension.lowercased()

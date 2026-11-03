@@ -5,9 +5,32 @@ import Network
 /// Hidden Mail drafts. Ports lab/hidden-draft-f51a (draftmime.py, imap_draft.py,
 /// hidden_draft.py with IMPORT_FORMAT=emlx). Never sends. Never opens SMTP.
 enum HiddenDraft {
-    static let service = "MailExporter iCloud IMAP"
-    static let host = "imap.mail.me.com"
+    static let icloudService = "MailExporter iCloud IMAP"
+    static let gmailService = "MailExporter Gmail IMAP"
+    static let icloudHost = "imap.mail.me.com"
+    static let gmailHost = "imap.gmail.com"
     static let port: UInt16 = 993
+
+    struct IMAPTarget {
+        var host: String
+        var service: String
+        var mailbox: String
+    }
+
+    /// iCloud and Gmail upload over IMAP. Every other account stays on import.
+    static func imapTarget(address: String) -> IMAPTarget? {
+        let type = accountType(address: address).lowercased()
+        if type.contains("icloud") {
+            return IMAPTarget(host: icloudHost, service: icloudService, mailbox: "Drafts")
+        }
+        let addr = bareAddress(address).lowercased()
+        let gmailAddress = addr.hasSuffix("@gmail.com") || addr.hasSuffix("@googlemail.com")
+        let gmailType = type.contains("gmail") || type.contains("google")
+        if gmailType || (type.contains("imap") && gmailAddress) {
+            return IMAPTarget(host: gmailHost, service: gmailService, mailbox: "[Gmail]/Drafts")
+        }
+        return nil
+    }
 
     struct Spec {
         var to: [String] = []
@@ -115,12 +138,19 @@ enum HiddenDraft {
         var seconds: [String: Double] = ["build": elapsed(tBuild)]
 
         var setupLine = ""
-        if chosen != "import" {
-            let password = keychainPassword(account: built.fromAddress)
+        let target = imapTarget(address: built.fromAddress)
+        if chosen != "import", let target {
+            let password = keychainPassword(account: built.fromAddress, service: target.service)
             payload["passwordItem"] = password != nil
             if let password {
                 let tConnect = Date()
-                switch upload(mime: built.mime, user: built.fromAddress, password: password) {
+                switch upload(
+                    mime: built.mime,
+                    user: built.fromAddress,
+                    password: password,
+                    host: target.host,
+                    mailbox: target.mailbox
+                ) {
                 case .uploaded(let uid, let connect, let append, let raw):
                     seconds["connect"] = connect
                     seconds["upload"] = append
@@ -153,14 +183,14 @@ enum HiddenDraft {
             } else if chosen == "upload" {
                 payload["method"] = "upload"
                 payload["seconds"] = seconds
-                payload["error"] = "security add-generic-password -a \(built.fromAddress) -s \"\(service)\" -w"
+                payload["error"] = "security add-generic-password -a \(built.fromAddress) -s \"\(target.service)\" -w"
                 payload["result"] = "attached 0 of \(built.requested)"
                 return finish([:])
             } else {
-                setupLine = "security add-generic-password -a \(built.fromAddress) -s \"\(service)\" -w"
+                setupLine = "security add-generic-password -a \(built.fromAddress) -s \"\(target.service)\" -w"
             }
-        } else {
-            payload["passwordItem"] = keychainPassword(account: built.fromAddress) != nil
+        } else if chosen == "import", let target {
+            payload["passwordItem"] = keychainPassword(account: built.fromAddress, service: target.service) != nil
         }
 
         ensureMail()
@@ -814,10 +844,10 @@ enum HiddenDraft {
         case failed(String)
     }
 
-    static func upload(mime: Data, user: String, password: String) -> Upload {
+    static func upload(mime: Data, user: String, password: String, host: String, mailbox: String) -> Upload {
         let t0 = Date()
         let session = IMAP()
-        guard session.connect(timeout: 3) else {
+        guard session.connect(host: host, timeout: 3) else {
             session.close()
             return .offline
         }
@@ -828,13 +858,13 @@ enum HiddenDraft {
             return .failed(err.isEmpty ? "IMAP login failed" : err)
         }
         let t1 = Date()
-        guard let uid = session.appendDraft(mime) else {
+        guard let uid = session.appendDraft(mime, mailbox: mailbox) else {
             let err = session.last
             session.close()
             return .failed(err.isEmpty ? "IMAP append failed" : err)
         }
         let append = elapsed(t1)
-        let raw = session.fetchBody(uid: uid)
+        let raw = session.fetchBody(uid: uid, mailbox: mailbox)
         session.close()
         return .uploaded(uid: uid, connect: connect, append: append, raw: raw)
     }
@@ -1146,7 +1176,7 @@ enum HiddenDraft {
         return r.ok ? r.text : "missing"
     }
 
-    static func keychainPassword(account: String) -> String? {
+    static func keychainPassword(account: String, service: String) -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         p.arguments = ["find-generic-password", "-a", account, "-s", service, "-w"]
@@ -1247,10 +1277,15 @@ private final class IMAP {
     var last = ""
     private var sendNote = ""
 
-    func connect(timeout: TimeInterval) -> Bool {
+    private func quotedMailbox(_ name: String) -> String {
+        let escaped = name.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    func connect(host: String, timeout: TimeInterval) -> Bool {
         let tls = NWProtocolTLS.Options()
         let params = NWParameters(tls: tls)
-        let c = NWConnection(host: NWEndpoint.Host(HiddenDraft.host), port: NWEndpoint.Port(rawValue: HiddenDraft.port)!, using: params)
+        let c = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: HiddenDraft.port)!, using: params)
         conn = c
         let ready = DispatchSemaphore(value: 0)
         let box = Box(false)
@@ -1288,8 +1323,8 @@ private final class IMAP {
         return reply.contains("A1 OK")
     }
 
-    func appendDraft(_ mime: Data) -> Int? {
-        let line = "A2 APPEND Drafts (\\Seen \\Draft) {\(mime.count)}"
+    func appendDraft(_ mime: Data, mailbox: String) -> Int? {
+        let line = "A2 APPEND \(quotedMailbox(mailbox)) (\\Seen \\Draft) {\(mime.count)}"
         let ask = command(line, timeout: 15)
         guard ask.contains("+") else {
             last = ask.isEmpty ? "no continuation \(sendNote)" : ask
@@ -1308,9 +1343,9 @@ private final class IMAP {
         return 0
     }
 
-    func fetchBody(uid: Int) -> Data? {
+    func fetchBody(uid: Int, mailbox: String) -> Data? {
         guard uid > 0 else { return nil }
-        let selected = command("A3 SELECT Drafts", timeout: 15)
+        let selected = command("A3 SELECT \(quotedMailbox(mailbox))", timeout: 15)
         guard selected.contains("A3 OK") else {
             last = selected
             return nil
