@@ -463,9 +463,13 @@ def compose_draft(path: str = "", markdown: str = "") -> str:
     only under the project; ``..`` / ``~/`` that escape it are refused.
     After the draft is in Mail, the result includes ``attached`` vs
     ``requested`` and is not OK if they differ.
-    Upload uses IMAP when the account is iCloud, the keychain item
-    ``MailExporter iCloud IMAP`` exists, and TLS succeeds within 3 seconds.
-    Otherwise the app imports a mailbox and moves the message into Drafts.
+    Upload uses IMAP for iCloud (``imap.mail.me.com``, keychain item
+    ``MailExporter iCloud IMAP``) and for Gmail (``imap.gmail.com``, keychain
+    item ``MailExporter Gmail IMAP``) when that item exists and TLS succeeds
+    within 3 seconds. If the item is missing, TLS fails within 3 seconds, or
+    the account is neither iCloud nor Gmail, the app imports a mailbox and
+    moves the message into Drafts. That import leaves an empty Import or
+    Import-N mailbox until the user deletes it in Mail.
     """
     if path:
         md_path = Path(path).expanduser()

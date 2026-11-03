@@ -158,13 +158,14 @@ Dropping a PDF on the Export pane does **not** attach it — put it on `Attach:`
 
 | Situation | What happens |
 |-----------|----------------|
-| iCloud account, password stored, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP |
-| Server unreachable, no password, or the account is not iCloud | Import an Apple mailbox, then move the message into Drafts |
+| iCloud account, password stored, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP (`imap.mail.me.com`, keychain item `MailExporter iCloud IMAP`) |
+| Gmail account, password stored, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP (`imap.gmail.com`, keychain item `MailExporter Gmail IMAP`) |
+| Item missing, TLS fails within 3 seconds, or the account is neither iCloud nor Gmail | Import an Apple mailbox, then move the message into Drafts. This leaves an empty Import or Import-N mailbox until you delete it in Mail |
 | `In-Reply-To` and the original `.eml` is in `Email/` | The draft quotes that message |
 | `In-Reply-To` set, original `.eml` missing, and `Reply` is not `new` | The draft is not created |
 | No `In-Reply-To`, or `Reply: new` | New draft, with no quote |
 
-MailExporter needs **Automation → Mail**. It does not need Accessibility to create a draft. Upload reads the keychain item `MailExporter iCloud IMAP` for the From address. If that item is missing, MailExporter imports and reports `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w`.
+MailExporter needs **Automation → Mail**. It does not need Accessibility to create a draft. iCloud upload reads the keychain item `MailExporter iCloud IMAP`. Gmail upload reads the keychain item `MailExporter Gmail IMAP`. If that item is missing, MailExporter imports and reports `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w` or `security add-generic-password -a <address> -s "MailExporter Gmail IMAP" -w`. The import leaves an empty Import or Import-N mailbox until you delete it in Mail.
 
 ## MailExporter MCP
 

@@ -186,7 +186,7 @@ Keep the same filename when moving `Drafts/` → `Sent/`. Move (do not copy or d
 
 Details and the Markdown front-matter format are in `how_to_use.md` at the project root. `Attach:` paths must stay inside that project. Prefer `Documents/…` from the project root; a file next to the `.md` in `Drafts/` also works. List several with comma+space (`a.pdf, b.pdf`). After the draft is in Mail, `compose_draft` reports attached vs requested and does not return a silent OK if they differ.
 
-Upload writes the draft to iCloud Drafts over IMAP when the From account is iCloud, TLS to the mail server succeeds within 3 seconds, and the login keychain has `MailExporter iCloud IMAP` for that address. If the server is unreachable, the password item is missing, or the account is not iCloud, MailExporter imports a mailbox and moves the message into Drafts. Store the password with `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w`.
+Upload writes the draft over IMAP when the From account is iCloud (`imap.mail.me.com`, keychain item `MailExporter iCloud IMAP`) or Gmail (`imap.gmail.com`, keychain item `MailExporter Gmail IMAP`), and TLS succeeds within 3 seconds. If the item is missing, TLS fails within 3 seconds, or the account is neither iCloud nor Gmail, MailExporter imports a mailbox and moves the message into Drafts. That import leaves an empty Import or Import-N mailbox until you delete it in Mail. Store the password with `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w` or `security add-generic-password -a <address> -s "MailExporter Gmail IMAP" -w`.
 
 ---
 
