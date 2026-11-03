@@ -27,6 +27,9 @@ def test_howto_says_export_not_smart_mailbox() -> None:
     assert "MailExporter Gmail IMAP" in text
     assert "imap.gmail.com" in text
     assert "Import-N" in text
+    assert "https://myaccount.google.com/apppasswords" in text
+    assert 'security add-generic-password -a <address> -s "MailExporter Gmail IMAP" -w' in text
+    assert "not the Google sign-in password" in text
 
 
 def test_howto_tells_assistant_to_reread_after_update() -> None:

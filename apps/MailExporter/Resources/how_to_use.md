@@ -102,13 +102,13 @@ Dropping a PDF on the Export pane does **not** attach it — put it on `Attach:`
 | Situation | What happens |
 |-----------|----------------|
 | iCloud account, password stored, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP (`imap.mail.me.com`, keychain item `MailExporter iCloud IMAP`) |
-| Gmail account, password stored, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP (`imap.gmail.com`, keychain item `MailExporter Gmail IMAP`) |
+| Gmail account, login keychain has service `MailExporter Gmail IMAP` for the From address, TLS succeeds within 3 seconds | Upload the email to Drafts over IMAP (`imap.gmail.com`). The password is a Gmail app password from https://myaccount.google.com/apppasswords, not the Google sign-in password |
 | Item missing, TLS fails within 3 seconds, or the account is neither iCloud nor Gmail | Import an Apple mailbox, then move the message into Drafts. This leaves an empty Import or Import-N mailbox until you delete it in Mail |
 | `In-Reply-To` and the original `.eml` is in `Email/` | The draft quotes that message |
 | `In-Reply-To` set, original `.eml` missing, and `Reply` is not `new` | The draft is not created |
 | No `In-Reply-To`, or `Reply: new` | New draft, with no quote |
 
-MailExporter needs **Automation → Mail**. It does not need Accessibility to create a draft. iCloud upload reads the keychain item `MailExporter iCloud IMAP`. Gmail upload reads the keychain item `MailExporter Gmail IMAP`. If that item is missing, MailExporter imports and reports `security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w` or `security add-generic-password -a <address> -s "MailExporter Gmail IMAP" -w`. The import leaves an empty Import or Import-N mailbox until you delete it in Mail.
+MailExporter needs **Automation → Mail**. It does not need Accessibility to create a draft. Gmail uploads when the login keychain has service `MailExporter Gmail IMAP` for the From address. The command is `security add-generic-password -a <address> -s "MailExporter Gmail IMAP" -w`. The password is a Gmail app password from https://myaccount.google.com/apppasswords, not the Google sign-in password. iCloud stays `MailExporter iCloud IMAP` (`security add-generic-password -a <address> -s "MailExporter iCloud IMAP" -w`). If the item is missing, the draft still imports and leaves an empty Import or Import-N mailbox.
 
 ## MailExporter MCP
 
